@@ -14,7 +14,17 @@ from decimal import Decimal, InvalidOperation
 
 import regex as re
 
-_ADDRESS = re.compile(r"0x[a-fA-F0-9]{40}")
+_HEX = r"[0-9a-fA-F]"
+_ADDRESS = re.compile(rf"0x{_HEX}{{40}}")
+# Separators an attacker can splice between hex digits to hide an address from a naive
+# scan: ASCII whitespace (including the "\n" that joins context entries), zero-width /
+# bidi controls, soft hyphen and hyphen. Recovering an address *through* these is what
+# lets L4 provenance see a deliberately broken or split attacker address.
+_SEP = r"[\s​-‏‪-‮⁠-⁤﻿­\-]"
+# 0x followed by exactly 40 hex digits, each optionally wrapped in separators, not
+# immediately continued by more hex (so a long hash isn't read as a 40-char prefix).
+_ADDRESS_OBFUSCATED = re.compile(rf"0x{_SEP}*(?:{_HEX}{_SEP}*){{40}}(?!{_HEX})")
+_STRIP_SEP = re.compile(_SEP)
 # A number (with optional thousands separators / decimals) followed by an asset symbol,
 # e.g. "5 USDC", "1,000.50 usdc", "2.5 ETH".
 _AMOUNT_WITH_ASSET = re.compile(
@@ -23,10 +33,23 @@ _AMOUNT_WITH_ASSET = re.compile(
 
 
 def find_addresses(text: str) -> list[str]:
-    """Return all 0x-style addresses in ``text``, lowercased, order-preserving-unique."""
+    """Return all 0x-style addresses in ``text``, lowercased, order-preserving-unique.
+
+    Two passes: clean addresses, then addresses obfuscated with interspersed separators
+    (spaces, zero-width chars, hyphens) or split across joined context entries. The
+    second pass strips separators and re-validates, so ``"0x A77a c1d0 …"`` and an
+    address broken across a ``"\\n"`` boundary still resolve — closing the L4 provenance
+    evasion where the attacker address is present in untrusted text but unparseable.
+    Conservative by construction: a match needs ``0x`` plus exactly 40 hex digits with
+    only separators between them, which ordinary prose does not produce.
+    """
     seen: dict[str, None] = {}
     for m in _ADDRESS.finditer(text):
         seen.setdefault(m.group(0).lower(), None)
+    for m in _ADDRESS_OBFUSCATED.finditer(text):
+        candidate = _STRIP_SEP.sub("", m.group(0)).lower()
+        if len(candidate) == 42:  # "0x" + 40 hex
+            seen.setdefault(candidate, None)
     return list(seen)
 
 
