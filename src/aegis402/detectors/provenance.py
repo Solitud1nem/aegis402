@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from ..config import Settings, get_settings
 from ..schemas import Intent, Signal
-from ..text_extract import find_addresses
+from ..text_extract import address_appears
 
 
 class ProvenanceCheck:
@@ -23,11 +23,13 @@ class ProvenanceCheck:
 
     def run(self, intent: Intent) -> Signal:
         """Determine whether the recipient originated from untrusted context."""
-        recipient_lc = intent.payment_intent.recipient.lower()
-        in_request = recipient_lc in find_addresses(intent.user_request)
-
-        untrusted_addrs = find_addresses("\n".join(intent.untrusted_context))
-        in_untrusted = recipient_lc in untrusted_addrs
+        recipient = intent.payment_intent.recipient
+        recipient_lc = recipient.lower()
+        # Obfuscation-tolerant matching: an attacker who splices, punctuates, drops the
+        # 0x prefix from, or homoglyph-spells the recipient inside untrusted text must
+        # not thereby hide its provenance (see text_extract.address_appears).
+        in_request = address_appears(recipient, intent.user_request)
+        in_untrusted = address_appears(recipient, "\n".join(intent.untrusted_context))
 
         # Allowlisted recipients are trusted by mandate regardless of text origin.
         mandate = intent.mandate
@@ -44,11 +46,14 @@ class ProvenanceCheck:
             )
 
         if not in_request and not allowlisted and intent.user_request.strip():
-            # Recipient is neither requested, allowlisted, nor traceable — weak flag.
+            # Recipient is neither requested, allowlisted, nor present in any context the
+            # guard saw — its origin is unaccountable. Scored into the REVIEW band (see
+            # Settings.unanchored_recipient_score) so an autonomous agent cannot silently
+            # pay an address it cannot justify; a human confirms instead.
             return Signal(
                 layer=self.layer,
-                score=0.35,
-                reason="recipient not traceable to the owner's request or allowlist",
+                score=self._settings.unanchored_recipient_score,
+                reason="recipient not traceable to the owner's request, allowlist, or context",
                 evidence={"recipient": intent.payment_intent.recipient, "origin": "unknown"},
             )
 

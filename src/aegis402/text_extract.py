@@ -10,9 +10,56 @@ attack is silently allowed (other layers still fire).
 
 from __future__ import annotations
 
+import unicodedata
 from decimal import Decimal, InvalidOperation
 
 import regex as re
+
+_HEX_SET = frozenset("0123456789abcdef")
+# Common script confusables for hex characters, folded to their Latin hex equivalent.
+# NFKC (applied first) handles fullwidth / compatibility forms; these cover Cyrillic /
+# Greek look-alikes NFKC leaves intact, e.g. an address spelled with Cyrillic "а"/"е"/"с".
+# Keys are lowercase (text is lowercased before translation).
+_CONFUSABLES = str.maketrans(
+    {
+        "а": "a", "α": "a",          # Cyrillic a, Greek alpha
+        "ь": "b", "в": "b", "β": "b",  # Cyrillic soft-sign/ve, Greek beta
+        "с": "c", "ϲ": "c",          # Cyrillic es, Greek lunate sigma
+        "ԁ": "d",                    # Cyrillic komi de
+        "е": "e", "ё": "e", "ε": "e",  # Cyrillic ie/yo, Greek epsilon
+        "ғ": "f", "ϝ": "f",          # Cyrillic ghe-stroke, Greek digamma
+        "о": "0", "ο": "0",          # Cyrillic/Greek o -> zero (hex has no letter o)
+    }
+)
+
+
+def _hex_stream(text: str) -> str:
+    """Reduce text to a pure lowercase hex stream for obfuscation-tolerant matching.
+
+    NFKC-normalize (folds fullwidth/compatibility forms), lowercase, fold common script
+    confusables to their Latin hex equivalent, then drop every non-hex character. This
+    collapses separators, punctuation, a missing ``0x`` prefix and homoglyphs alike, so a
+    KNOWN 40-hex address can be located through arbitrary obfuscation. Safe because a
+    specific 160-bit needle does not occur by chance in collapsed text.
+    """
+    folded = unicodedata.normalize("NFKC", text).lower().translate(_CONFUSABLES)
+    return "".join(c for c in folded if c in _HEX_SET)
+
+
+def address_appears(address: str, text: str) -> bool:
+    """True if ``address`` occurs in ``text`` under obfuscation-tolerant matching.
+
+    Used by L4 provenance to decide whether a specific recipient was sourced from a
+    piece of text, defeating attacker tricks (interspersed separators/punctuation,
+    dropped ``0x``, fullwidth digits, Cyrillic/Greek homoglyphs) that defeat a literal
+    address scan. Returns False for anything that is not a 40-hex address.
+    """
+    body = address[2:] if address[:2].lower() == "0x" else address
+    body = body.lower()
+    if len(body) != 40 or any(c not in _HEX_SET for c in body):
+        return False
+    return body in _hex_stream(text)
+
 
 _HEX = r"[0-9a-fA-F]"
 _ADDRESS = re.compile(rf"0x{_HEX}{{40}}")

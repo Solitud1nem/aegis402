@@ -123,11 +123,49 @@ def test_quoted_injection_full_stack_allows() -> None:
     assert DecisionEngine(Settings()).evaluate(intent).verdict == VerdictType.ALLOW
 
 
+def test_unanchored_recipient_full_stack_reviews() -> None:
+    """End-to-end: an open-ended (no-allowlist) payment to an address that appears
+    nowhere in the request or context is routed to REVIEW, not silently ALLOWed."""
+    raw = {
+        "user_request": "Please settle the outstanding invoice for hosting.",
+        "untrusted_context": ["Hosting Inc: your invoice of 40 USDC is due. Pay the "
+                              "account on file, thanks."],
+        "payment_intent": {
+            "recipient": "0xA77ac1d00000000000000000000000000000bad1",
+            "amount": 40 * USDC, "asset": "USDC", "network": "base-sepolia",
+        },
+    }
+    verdict = DecisionEngine(Settings()).evaluate(build_intent(raw))
+    assert verdict.verdict == VerdictType.REVIEW
+
+
 def test_applicable_zero_score_still_counts() -> None:
-    """A layer that ran clean (applicable, score 0) is included and pulls risk down."""
+    """A layer that ran clean (applicable, score 0) is included and pulls risk down.
+
+    Uses a sub-review score so this exercises pure aggregate dilution, independent of the
+    grounded-review-band escalation (which would otherwise report the layer's own score).
+    """
     settings = Settings()
-    one = DecisionEngine(settings, detectors=[_StubDetector("L3", 0.6)])
+    one = DecisionEngine(settings, detectors=[_StubDetector("L3", 0.3)])
     with_clean = DecisionEngine(
-        settings, detectors=[_StubDetector("L3", 0.6), _StubDetector("L1", 0.0)]
+        settings, detectors=[_StubDetector("L3", 0.3), _StubDetector("L1", 0.0)]
     )
     assert with_clean.evaluate(_intent()).score < one.evaluate(_intent()).score
+
+
+def test_grounded_review_band_forces_review_despite_dilution() -> None:
+    """A grounded layer in [review, block) escalates to REVIEW even when clean layers
+    dilute the aggregate below review_threshold."""
+    engine = DecisionEngine(Settings(), detectors=[
+        _StubDetector("L3", 0.5), _StubDetector("L1", 0.0), _StubDetector("L4", 0.0),
+    ])
+    assert engine.evaluate(_intent()).verdict == VerdictType.REVIEW
+
+
+def test_text_only_review_band_diluted_does_not_force_review() -> None:
+    """A text-only layer (L1/L2) in the review band, diluted by clean grounded layers,
+    must NOT force REVIEW — only grounded layers get the band escalation."""
+    engine = DecisionEngine(Settings(), detectors=[
+        _StubDetector("L1", 0.5), _StubDetector("L3", 0.0), _StubDetector("L4", 0.0),
+    ])
+    assert engine.evaluate(_intent()).verdict == VerdictType.ALLOW

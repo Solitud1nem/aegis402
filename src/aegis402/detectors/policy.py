@@ -12,7 +12,7 @@ from datetime import UTC, datetime
 
 from ..config import Settings, get_settings
 from ..schemas import Intent, Signal
-from ..text_extract import find_addresses, find_requested_amount
+from ..text_extract import address_appears, find_addresses, find_requested_amount
 
 
 class PaymentPolicyGate:
@@ -48,9 +48,11 @@ class PaymentPolicyGate:
             score = max(score, 0.9)
 
         # 3. Recipient substitution: an address named in the owner's request that
-        #    differs from where the agent is actually paying.
+        #    differs from where the agent is actually paying. Recipient-presence uses
+        #    obfuscation-tolerant matching so an address the owner wrote with formatting
+        #    is not mistaken for a substitution.
         requested_addrs = find_addresses(intent.user_request)
-        if requested_addrs and recipient_lc not in requested_addrs:
+        if requested_addrs and not address_appears(pi.recipient, intent.user_request):
             violations.append(
                 {
                     "check": "recipient_substituted",

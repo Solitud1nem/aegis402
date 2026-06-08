@@ -47,6 +47,17 @@ class Settings(BaseSettings):
         ge=0,
         description="Payments at/above this (minimal units) always escalate to REVIEW.",
     )
+    unanchored_recipient_score: float = Field(
+        default=0.5,
+        ge=0.0,
+        le=1.0,
+        description=(
+            "L4 score for a recipient with no traceable provenance (not in the request, "
+            "not allowlisted, and absent from untrusted context). Defaults into the "
+            "REVIEW band so an autonomous agent cannot silently pay an unaccountable "
+            "address; set below 'review_threshold' to allow such payments."
+        ),
+    )
     layer_weights: dict[str, float] = Field(
         default_factory=lambda: {
             "L1": 0.25,

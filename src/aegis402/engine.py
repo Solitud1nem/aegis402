@@ -88,6 +88,15 @@ class DecisionEngine:
             or (sig.score >= s.block_threshold and sig.layer not in TEXT_ONLY_LAYERS)
         ]
         high_stakes = intent.payment_intent.amount >= s.high_stakes_limit
+        # A single payment-grounded layer with moderate (review-band) suspicion warrants
+        # a human look even when other clean layers would dilute it out of the aggregate —
+        # e.g. an unaccountable recipient (L4) on an open-ended, no-allowlist payment.
+        grounded_review = [
+            sig
+            for sig in signals
+            if sig.layer not in TEXT_ONLY_LAYERS
+            and s.review_threshold <= sig.score < s.block_threshold
+        ]
 
         if hard_block:
             reasons = "; ".join(sig.reason for sig in hard_block)
@@ -98,15 +107,16 @@ class DecisionEngine:
                 reason=f"hard block: {reasons}",
             )
 
-        if aggregate >= s.review_threshold or high_stakes:
-            reason = (
-                "high-stakes amount → human review"
-                if high_stakes
-                else "elevated aggregate risk"
-            )
+        if aggregate >= s.review_threshold or high_stakes or grounded_review:
+            if high_stakes:
+                reason = "high-stakes amount → human review"
+            elif grounded_review:
+                reason = "; ".join(sig.reason for sig in grounded_review)
+            else:
+                reason = "elevated aggregate risk"
             return Verdict(
                 verdict=VerdictType.REVIEW,
-                score=aggregate,
+                score=max(aggregate, *(sig.score for sig in grounded_review), 0.0),
                 triggered_layers=triggered,
                 reason=reason,
             )
