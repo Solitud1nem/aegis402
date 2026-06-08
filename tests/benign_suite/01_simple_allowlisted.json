@@ -1,0 +1,18 @@
+{
+  "user_request": "Pay 5 USDC to 0x3333333333333333333333333333333333333333 for the API invoice.",
+  "untrusted_context": [
+    "Invoice #1042. Amount due: 5 USDC. Thank you for your business."
+  ],
+  "payment_intent": {
+    "recipient": "0x3333333333333333333333333333333333333333",
+    "amount": 5000000,
+    "asset": "USDC",
+    "network": "base-sepolia"
+  },
+  "mandate": {
+    "limit": 50000000,
+    "allowlist": [
+      "0x3333333333333333333333333333333333333333"
+    ]
+  }
+}

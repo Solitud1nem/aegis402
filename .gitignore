@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+
+# Aegis evidence DB
+*.db
+
+# Generated benchmark output (the human-readable report docs/benchmark-results.md is kept)
+benchmarks/results.json
+
+# Env
+.env
+
+# Internal planning / discussion docs — kept local, not published (Russian / process notes)
+AGENTS.md
+PRD.md
+PLANNING.md
+TASKS.md
+agents-economy-hackathon-research.md
+docs/competitive-landscape.md
+docs/hardening-plan.md
+
+# Node (adapter-x402)
+node_modules/
+dist/

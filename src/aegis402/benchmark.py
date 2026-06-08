@@ -1,0 +1,192 @@
+"""Benchmark harness — measure detection quality on a labeled corpus.
+
+Treats the guard as a binary classifier (malicious vs benign) where a case is
+"flagged" when the verdict is not ALLOW (BLOCK or REVIEW). Computes precision /
+recall / F1 / false-positive-rate overall, on a "core" subset (excluding cases
+marked ``hard`` — by-design misses and hard negatives), and per category, plus
+latency percentiles.
+
+Honest by construction: the corpus includes semantic-clean attacks the guard is
+expected to miss and benign text that quotes injection phrases (expected false
+positives), so the headline numbers are not a rigged 100 %.
+"""
+
+from __future__ import annotations
+
+import json
+import time
+from collections import defaultdict
+from pathlib import Path
+from typing import Any
+
+from pydantic import BaseModel
+
+from .config import Settings
+from .guard import Guard
+from .schemas import VerdictType
+
+
+class CaseResult(BaseModel):
+    """Outcome of one benchmark case."""
+
+    name: str
+    label: str  # "malicious" | "benign"
+    category: str
+    hard: bool
+    verdict: str
+    detected: bool  # verdict != ALLOW
+    latency_ms: float
+
+
+class Metrics(BaseModel):
+    """Binary-classifier metrics for a set of cases."""
+
+    n: int
+    tp: int
+    fp: int
+    tn: int
+    fn: int
+    precision: float
+    recall: float
+    f1: float
+    fpr: float
+
+
+class CategoryMetric(BaseModel):
+    """Per-category detection summary."""
+
+    category: str
+    label: str
+    n: int
+    detected: int
+    hard: bool
+
+
+class BenchmarkReport(BaseModel):
+    """Full benchmark result."""
+
+    total: int
+    overall: Metrics
+    core: Metrics  # excludes hard cases
+    per_category: list[CategoryMetric]
+    latency_p50_ms: float
+    latency_p95_ms: float
+
+
+def _safe_div(num: float, den: float) -> float:
+    return num / den if den else 0.0
+
+
+def _metrics(results: list[CaseResult]) -> Metrics:
+    tp = sum(r.label == "malicious" and r.detected for r in results)
+    fn = sum(r.label == "malicious" and not r.detected for r in results)
+    fp = sum(r.label == "benign" and r.detected for r in results)
+    tn = sum(r.label == "benign" and not r.detected for r in results)
+    precision = _safe_div(tp, tp + fp)
+    recall = _safe_div(tp, tp + fn)
+    f1 = _safe_div(2 * precision * recall, precision + recall)
+    fpr = _safe_div(fp, fp + tn)
+    return Metrics(
+        n=len(results), tp=tp, fp=fp, tn=tn, fn=fn,
+        precision=precision, recall=recall, f1=f1, fpr=fpr,
+    )
+
+
+def load_dataset(dataset_dir: Path) -> list[tuple[dict[str, Any], dict[str, Any]]]:
+    """Load (meta, intent) pairs from a directory of labeled ``*.json`` cases."""
+    cases: list[tuple[dict[str, Any], dict[str, Any]]] = []
+    for path in sorted(dataset_dir.glob("*.json")):
+        raw = json.loads(path.read_text(encoding="utf-8"))
+        meta = dict(raw.pop("_meta"))
+        meta.setdefault("name", path.stem)
+        cases.append((meta, raw))
+    return cases
+
+
+def evaluate(dataset_dir: Path, settings: Settings) -> BenchmarkReport:
+    """Run every case through a Guard and aggregate metrics."""
+    guard = Guard(settings)
+    results: list[CaseResult] = []
+    for meta, raw in load_dataset(dataset_dir):
+        t0 = time.perf_counter()
+        verdict = guard.inspect(raw)
+        dt = (time.perf_counter() - t0) * 1000
+        results.append(
+            CaseResult(
+                name=str(meta["name"]),
+                label=str(meta["label"]),
+                category=str(meta["category"]),
+                hard=bool(meta.get("hard", False)),
+                verdict=verdict.verdict.value,
+                detected=verdict.verdict != VerdictType.ALLOW,
+                latency_ms=dt,
+            )
+        )
+
+    by_cat: dict[str, list[CaseResult]] = defaultdict(list)
+    for r in results:
+        by_cat[r.category].append(r)
+    per_category = [
+        CategoryMetric(
+            category=cat,
+            label=rows[0].label,
+            n=len(rows),
+            detected=sum(r.detected for r in rows),
+            hard=rows[0].hard,
+        )
+        for cat, rows in sorted(by_cat.items())
+    ]
+
+    latencies = sorted(r.latency_ms for r in results)
+    p50 = latencies[len(latencies) // 2] if latencies else 0.0
+    p95 = latencies[min(len(latencies) - 1, int(0.95 * len(latencies)))] if latencies else 0.0
+
+    return BenchmarkReport(
+        total=len(results),
+        overall=_metrics(results),
+        core=_metrics([r for r in results if not r.hard]),
+        per_category=per_category,
+        latency_p50_ms=p50,
+        latency_p95_ms=p95,
+    )
+
+
+def _fmt_metrics_row(name: str, m: Metrics) -> str:
+    return (
+        f"| {name} | {m.n} | {m.precision:.0%} | {m.recall:.0%} | "
+        f"{m.f1:.2f} | {m.fpr:.0%} | {m.tp}/{m.fp}/{m.tn}/{m.fn} |"
+    )
+
+
+def to_markdown(report: BenchmarkReport) -> str:
+    """Render a benchmark report as a committable markdown document."""
+    lines = [
+        "# Aegis402 — Benchmark Results",
+        "",
+        "> Generated by `scripts/benchmark.py` over `benchmarks/dataset/`. The guard is",
+        "> scored as a binary classifier: a case is *flagged* when the verdict ≠ ALLOW.",
+        "> **core** excludes `hard` cases (semantic-clean attacks we expect to miss, and",
+        "> benign text quoting injection phrases we expect to over-flag) — so *overall* is",
+        "> the honest number and *core* is the clean-cut subset.",
+        "",
+        f"Corpus: **{report.total}** cases · latency p50 **{report.latency_p50_ms:.0f}ms** · "
+        f"p95 **{report.latency_p95_ms:.0f}ms**.",
+        "",
+        "## Metrics",
+        "",
+        "| set | n | precision | recall | F1 | FPR | TP/FP/TN/FN |",
+        "|---|--:|--:|--:|--:|--:|--|",
+        _fmt_metrics_row("overall", report.overall),
+        _fmt_metrics_row("core (no hard)", report.core),
+        "",
+        "## Per category",
+        "",
+        "| category | label | n | flagged | hard |",
+        "|---|---|--:|--:|:--:|",
+    ]
+    for c in report.per_category:
+        lines.append(
+            f"| {c.category} | {c.label} | {c.n} | {c.detected} | {'yes' if c.hard else ''} |"
+        )
+    lines.append("")
+    return "\n".join(lines)

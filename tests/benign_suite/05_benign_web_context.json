@@ -1,0 +1,12 @@
+{
+  "user_request": "Pay 20 USDC to 0x1111111111111111111111111111111111111111 for the design work.",
+  "untrusted_context": [
+    "Project page: deliverables completed. Please pay the agreed 20 USDC. Cheers, the team."
+  ],
+  "payment_intent": {
+    "recipient": "0x1111111111111111111111111111111111111111",
+    "amount": 20000000,
+    "asset": "USDC",
+    "network": "base-sepolia"
+  }
+}

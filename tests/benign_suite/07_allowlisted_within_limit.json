@@ -1,0 +1,18 @@
+{
+  "user_request": "Pay 40 USDC to 0x3333333333333333333333333333333333333333 for the quarterly retainer.",
+  "untrusted_context": [
+    "Retainer invoice: 40 USDC."
+  ],
+  "payment_intent": {
+    "recipient": "0x3333333333333333333333333333333333333333",
+    "amount": 40000000,
+    "asset": "USDC",
+    "network": "base-sepolia"
+  },
+  "mandate": {
+    "limit": 50000000,
+    "allowlist": [
+      "0x3333333333333333333333333333333333333333"
+    ]
+  }
+}

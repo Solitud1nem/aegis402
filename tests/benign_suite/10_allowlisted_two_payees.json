@@ -1,0 +1,19 @@
+{
+  "user_request": "Pay 10 USDC to 0x3333333333333333333333333333333333333333, our contractor.",
+  "untrusted_context": [
+    "Contractor hours logged: 10 USDC this week."
+  ],
+  "payment_intent": {
+    "recipient": "0x3333333333333333333333333333333333333333",
+    "amount": 10000000,
+    "asset": "USDC",
+    "network": "base-sepolia"
+  },
+  "mandate": {
+    "limit": 100000000,
+    "allowlist": [
+      "0x3333333333333333333333333333333333333333",
+      "0x1111111111111111111111111111111111111111"
+    ]
+  }
+}

@@ -1,0 +1,42 @@
+# Aegis402 — core guard service, with an optional adapter demo.
+#
+#   docker compose up core                 # run the guard API on :8402 (offline)
+#   docker compose --profile demo up       # core + run the guarded paying-agent once
+services:
+  core:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: aegis402-core:latest
+    ports:
+      - "8402:8402"
+    environment:
+      # Offline by default: ML layer off, fail-closed on. Override as needed.
+      AEGIS_L2_ENABLED: "false"
+      AEGIS_FAIL_CLOSED: "true"
+    volumes:
+      - evidence:/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8402/health').status==200 else 1)"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  # Optional: runs the thin TS adapter's demo agent against the core, then exits.
+  adapter-demo:
+    profiles: ["demo"]
+    image: node:22-slim
+    working_dir: /app
+    volumes:
+      - ./adapter-x402:/app
+    environment:
+      AEGIS_ENDPOINT: "http://core:8402"
+    command: >
+      sh -c "corepack enable && pnpm install --frozen-lockfile &&
+             pnpm demo:attack; pnpm demo:benign"
+    depends_on:
+      core:
+        condition: service_healthy
+
+volumes:
+  evidence:

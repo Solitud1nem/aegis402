@@ -1,0 +1,15 @@
+.venv/
+**/__pycache__/
+*.py[cod]
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+*.db
+.env
+.git/
+tests/
+adapter-x402/node_modules/
+adapter-x402/dist/
+docs/
+*.md
+!README.md

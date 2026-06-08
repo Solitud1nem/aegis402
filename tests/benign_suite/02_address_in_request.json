@@ -1,0 +1,12 @@
+{
+  "user_request": "Send 12 USDC to 0x1111111111111111111111111111111111111111 for hosting this month.",
+  "untrusted_context": [
+    "Hosting invoice: 12 USDC due by the 1st."
+  ],
+  "payment_intent": {
+    "recipient": "0x1111111111111111111111111111111111111111",
+    "amount": 12000000,
+    "asset": "USDC",
+    "network": "base-sepolia"
+  }
+}

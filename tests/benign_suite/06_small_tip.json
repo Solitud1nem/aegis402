@@ -1,0 +1,12 @@
+{
+  "user_request": "Tip 1 USDC to 0x1111111111111111111111111111111111111111 for great support.",
+  "untrusted_context": [
+    "Support ticket resolved."
+  ],
+  "payment_intent": {
+    "recipient": "0x1111111111111111111111111111111111111111",
+    "amount": 1000000,
+    "asset": "USDC",
+    "network": "base-sepolia"
+  }
+}

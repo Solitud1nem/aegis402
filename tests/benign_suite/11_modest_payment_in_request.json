@@ -1,0 +1,12 @@
+{
+  "user_request": "Pay 15 USDC to 0x1111111111111111111111111111111111111111 for the consulting call.",
+  "untrusted_context": [
+    "Consulting: 1 hour @ 15 USDC."
+  ],
+  "payment_intent": {
+    "recipient": "0x1111111111111111111111111111111111111111",
+    "amount": 15000000,
+    "asset": "USDC",
+    "network": "base-sepolia"
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "user_request": "Pay exactly 3 USDC to 0x1111111111111111111111111111111111111111.",
+  "untrusted_context": [
+    "Receipt: 3 USDC."
+  ],
+  "payment_intent": {
+    "recipient": "0x1111111111111111111111111111111111111111",
+    "amount": 3000000,
+    "asset": "USDC",
+    "network": "base-sepolia"
+  }
+}

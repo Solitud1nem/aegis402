@@ -1,0 +1,21 @@
+{
+  "name": "@aegis402/adapter-x402",
+  "version": "0.1.0",
+  "description": "Thin x402 client wrapper that calls the Aegis402 guard before signing a PaymentPayload.",
+  "type": "module",
+  "main": "src/guard-middleware.ts",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "demo": "tsx examples/paying-agent.ts",
+    "demo:attack": "tsx examples/paying-agent.ts attack",
+    "demo:benign": "tsx examples/paying-agent.ts benign"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "devDependencies": {
+    "@types/node": "^25.9.2",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  }
+}
