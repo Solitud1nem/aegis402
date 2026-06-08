@@ -1,7 +1,14 @@
 """Decision Engine — aggregate detector signals into a :class:`Verdict`.
 
 Policy (configurable in :class:`~aegis402.config.Settings`):
-* Any single layer at/above ``block_threshold`` → BLOCK (one strong signal is enough).
+* A *payment-grounded* layer (L3/L4/L5) at/above ``block_threshold``, or any
+  fail-closed error, → BLOCK (one strong, payment-relevant signal is enough).
+* A *text-only* layer (L1/L2) does NOT hard-block on its own: matching injection
+  phrasing in untrusted context is not proof the payment was hijacked — the agent
+  may have read poisoned text without acting on it. Such signals still flow into the
+  weighted aggregate (and can reach REVIEW), and still BLOCK whenever a grounded
+  layer corroborates (the usual case). This removes the "context merely quotes an
+  injection phrase, but the payment is fully grounded" false positive.
 * A weighted aggregate at/above ``review_threshold`` → REVIEW.
 * Any payment at/above ``high_stakes_limit`` → at least REVIEW (human-in-the-loop).
 * Otherwise → ALLOW.
@@ -15,6 +22,11 @@ from __future__ import annotations
 from .config import Settings, get_settings
 from .detectors import Detector, default_detectors, safe_run
 from .schemas import Intent, Signal, Verdict, VerdictType
+
+# Layers that reason over untrusted *text* rather than the *payment* itself. A strong
+# hit here means "injection phrasing is present", not "the payment was redirected", so
+# it is insufficient to hard-block a payment the grounded layers (L3/L4/L5) clear.
+TEXT_ONLY_LAYERS = frozenset({"L1", "L2"})
 
 
 class DecisionEngine:
@@ -66,7 +78,15 @@ class DecisionEngine:
         triggered = [sig for sig in signals if sig.score > 0.0 or sig.error]
         aggregate = self._aggregate_score(signals)
 
-        hard_block = [sig for sig in signals if sig.score >= s.block_threshold]
+        # Hard block requires a payment-grounded layer at/above the threshold, or any
+        # fail-closed error. A text-only layer (L1/L2) alone is not enough — see module
+        # docstring and TEXT_ONLY_LAYERS — but its score still feeds the aggregate below.
+        hard_block = [
+            sig
+            for sig in signals
+            if sig.error
+            or (sig.score >= s.block_threshold and sig.layer not in TEXT_ONLY_LAYERS)
+        ]
         high_stakes = intent.payment_intent.amount >= s.high_stakes_limit
 
         if hard_block:
