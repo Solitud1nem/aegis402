@@ -57,7 +57,13 @@ _INJECTION_PATTERNS: list[tuple[str, str]] = [
 
 # Zero-width, bidi and other invisible control characters used to obfuscate text.
 _HIDDEN_CHARS = re.compile(r"[​-‏‪-‮⁠-⁤﻿­]")
-_HTML_COMMENT = re.compile(r"<!--.*?-->", re.DOTALL)
+# Bounded comment body: an unbounded `.*?` makes search() O(n²) on attacker text with many
+# unterminated `<!--` openers (each lazily scans to end of string) — ~4 s on 4 MB, a DoS on
+# attacker-controlled untrusted_context. Capping the body to a window keeps each opener's
+# scan O(1), so the whole scan is linear; a real injected instruction in a comment is far
+# shorter than this bound.
+_HTML_COMMENT_MAX_BODY = 4096
+_HTML_COMMENT = re.compile(rf"<!--.{{0,{_HTML_COMMENT_MAX_BODY}}}?-->", re.DOTALL)
 _BASE64_BLOB = re.compile(r"\b[A-Za-z0-9+/]{40,}={0,2}\b")
 _HEX_DIGITS = set("0123456789abcdefABCDEF")
 
