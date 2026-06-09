@@ -161,8 +161,10 @@ other controls are bounded and only ever affect payments to a party the owner re
   over-block later legitimate payments. The failure mode is fail-safe (over-block, not
   over-allow). **Mitigation (implemented seam, #2):** `SpendLedger.record_spend` returns
   a reconciliation id, and `mark_settled(id)` / `void(id)` confirm or reverse a payment —
-  voided spend is excluded from accounting, freeing the headroom. Surfacing that id
-  through the guard/adapter so a caller can reconcile automatically is post-hackathon.
+  voided spend is excluded from accounting, freeing the headroom. **Now surfaced:** an
+  ALLOW returns `Verdict.spend_id`; `Guard.reconcile(spend_id, settled=)` (and
+  `POST /guard/reconcile`, plus the adapter's `reconcile()`) confirm or void it, so an
+  integrator frees the headroom of a payment that never settled.
 - **TOCTOU race — fixed.** L5 reads the ledger during detection, while the spend is
   written *after* the verdict, so concurrent inspects for the same scope could each read a
   stale total and both pass. Resolved by `SpendLedger.try_reserve`, which does the
