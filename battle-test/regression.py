@@ -68,6 +68,16 @@ def check_redteam_llm() -> tuple[str, bool, str]:
     return ("redteam_llm (logic seams)", ok, f"{esc:.0f}/6 escapes")
 
 
+def check_crypto_provenance() -> tuple[str, bool, str]:
+    """Crypto-native corpus: L4 must be the sole grounded catcher on cohort A, FPR low."""
+    out = _run(["crypto_corpus.py"])
+    l4 = _num(r"only grounded layer at/above block_threshold\*\*: \*\*\d+/\d+ = (\d+)%", out)
+    fpr = _num(r"false positives: \*\*\d+/\d+ = (\d+)%", out)
+    ok = l4 is not None and fpr is not None and l4 >= 95 and fpr <= 15
+    return ("crypto provenance (L4-sole)", ok,
+            f"L4-only block {l4:.0f}% / FPR {fpr:.0f}%" if l4 is not None else "parse error")
+
+
 def check_redteam_mandate() -> tuple[str, bool, str]:
     out = _run(["redteam_mandate.py"])
     on_blocked = "require_signed_mandate ON" in out and re.search(
@@ -79,7 +89,7 @@ def check_redteam_mandate() -> tuple[str, bool, str]:
 def main() -> int:
     checks = [check_corpus(c) for c in CORPORA]
     checks += [check_adversarial(), check_seams(), check_redteam_llm(),
-               check_redteam_mandate()]
+               check_redteam_mandate(), check_crypto_provenance()]
 
     lines = ["# Consolidated regression board", ""]
     all_ok = True

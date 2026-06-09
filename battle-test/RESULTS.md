@@ -20,6 +20,26 @@ Post-round state: **pytest 140 passed**; consolidated board (`python regression.
 PASS — corpora below unchanged at 100 % / 0 %, white-box guarded escape 0 %, seams
 attacker-escape 0, LLM-adversary 0/6. See `docs/threat-model.md` for per-item detail.
 
+### The provenance number (crypto-native corpus)
+
+The honesty caveat below ("L4 contributes almost nothing on these corpora") is a property
+of the **fiat** corpora: the IBAN→synthetic-0x rail-swap means the attacker address never
+appears literally in untrusted text, so L4's strong path is unreachable and the 100 % is
+L3 (allowlist) driven. `crypto_corpus.py` closes that with a crypto-native corpus drawn
+from documented attack classes (address poisoning, vendor "address changed" notices,
+compromised docs) where the attacker address **is** in the poisoned context and **no**
+address is in the owner's request and there is **no allowlist** — so L1/L2/L3 are silent.
+
+- Cohort A (80 semantic-clean redirects): BLOCK recall **100 %**, with **L4 the sole
+  grounded layer ≥ block_threshold on 100 %** of them — the provenance moat, measured.
+- Cohort B (20 no-anchor): caught **20/20** as L4 REVIEW (honest: unaccountable recipients
+  → human confirm, not BLOCK).
+- Cohort C (40 benign, recipient named in the request): FPR **0 %**.
+
+Self-authored but grounded in real techniques (not external like AgentDojo); its job is to
+exercise the one layer the fiat rail-swap structurally hides. Full board:
+`crypto_report.md`.
+
 ---
 
 ## Headline (as-is: owner provides a mandate with allowlist + per-payment limit)
