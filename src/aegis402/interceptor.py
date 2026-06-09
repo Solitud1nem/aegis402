@@ -47,6 +47,12 @@ def build_intent(raw: dict[str, Any]) -> Intent:
     """
     intent = Intent.model_validate(raw)
     intent.payment_intent.recipient = _normalize_address(intent.payment_intent.recipient)
+    # Canonicalize the asset symbol (strip + uppercase). The velocity ledger scopes spend
+    # by (mandate, asset); without this, "USDC" / "usdc" / "USDC " key to separate windows
+    # for the *same* token, so alternating the casing defeats the rate cap. Folding it here
+    # — once, at the trust boundary — keeps every layer (L3 confinement, L5 accounting) on
+    # the same key.
+    intent.payment_intent.asset = intent.payment_intent.asset.strip().upper()
     if intent.mandate is not None:
         intent.mandate.allowlist = [_normalize_address(a) for a in intent.mandate.allowlist]
     return intent

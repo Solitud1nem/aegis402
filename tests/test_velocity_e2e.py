@@ -51,6 +51,28 @@ def test_within_window_cap_all_allow(tmp_path: Path) -> None:
     assert all(v.verdict == VerdictType.ALLOW for v in verdicts)
 
 
+def test_asset_casing_does_not_split_velocity_window(tmp_path: Path) -> None:
+    """Alternating the asset string's case/whitespace must not create fresh windows: the
+    interceptor canonicalizes the asset, so the same token aggregates under one cap."""
+    settings = Settings(db_path=tmp_path / "case.db", velocity_cap=100 * USDC)
+    guard = Guard(settings)
+
+    verdicts = []
+    for asset in ("USDC", "usdc", "UsDc", "USDC "):
+        verdicts.append(
+            guard.inspect({
+                "user_request": f"Pay 60 {asset} to {VENDOR}.",
+                "untrusted_context": [],
+                "payment_intent": {"recipient": VENDOR, "amount": 60 * USDC,
+                                   "asset": asset, "network": "base-sepolia"},
+                "mandate": {"id": "agent-1", "allowlist": [VENDOR]},
+            }).verdict
+        )
+
+    assert verdicts[0] == VerdictType.ALLOW
+    assert all(v == VerdictType.BLOCK for v in verdicts[1:]), verdicts
+
+
 def test_concurrent_payments_do_not_overrun_cap(tmp_path: Path) -> None:
     """Check-then-act race: many parallel 60-USDC payments must not both ALLOW past a
     100-USDC cap. The guard's spend lock serializes read→decide→write, so total ALLOWed
