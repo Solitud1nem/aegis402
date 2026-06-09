@@ -3,6 +3,7 @@ trust anchor. Opt-in via Settings.require_signed_mandate + mandate_hmac_secret."
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from pathlib import Path
 
 from aegis402.config import Settings
@@ -13,6 +14,7 @@ from aegis402.schemas import Mandate, VerdictType
 from .conftest import ATTACKER, USDC, VENDOR
 
 SECRET = "owner-top-secret-key"
+FUTURE = datetime(2099, 1, 1, tzinfo=UTC)  # far-future expiry for signed-mandate tests
 
 
 # --- unit ------------------------------------------------------------------------------
@@ -60,8 +62,8 @@ def _payment(mandate: dict | None) -> dict:
     }
 
 
-def _signed_mandate(**fields: object) -> dict:
-    m = Mandate(**fields)  # type: ignore[arg-type]
+def _signed_mandate(*, expires_at: datetime | None = FUTURE, **fields: object) -> dict:
+    m = Mandate(expires_at=expires_at, **fields)  # type: ignore[arg-type]
     m.signature = mandate_signature(m, SECRET)
     return m.model_dump(mode="json")
 
@@ -80,6 +82,13 @@ def test_forged_allowlist_blocks(tmp_path: Path) -> None:
     raw = _payment(mandate)
     raw["payment_intent"]["recipient"] = ATTACKER
     assert guard.inspect(raw).verdict == VerdictType.BLOCK
+
+
+def test_signed_mandate_without_expiry_blocks(tmp_path: Path) -> None:
+    """Replay protection: a validly-signed mandate with no expires_at fails closed."""
+    guard = _guard(tmp_path, require_signed_mandate=True, mandate_hmac_secret=SECRET)
+    mandate = _signed_mandate(expires_at=None, allowlist=[VENDOR], limit=50 * USDC)
+    assert guard.inspect(_payment(mandate)).verdict == VerdictType.BLOCK
 
 
 def test_unsigned_mandate_blocks_when_required(tmp_path: Path) -> None:

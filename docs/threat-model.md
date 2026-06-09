@@ -21,8 +21,10 @@ chargeback** — so the only effective control is *before* signing.
   allowlist/limit) would otherwise escalate itself. **Mitigation (opt-in):**
   `require_signed_mandate` makes the guard verify an HMAC over the mandate's canonical
   content against a secret held only in server config (see `mandate_auth`); a
-  missing/forged/escalated mandate fails closed to BLOCK. A compromised agent can replay
-  the owner's real mandate but cannot mint or escalate one. Stateful velocity/budget
+  missing/forged/escalated mandate — or one with no expiry — fails closed to BLOCK. A
+  compromised agent can replay the owner's real mandate but cannot mint or escalate one,
+  and the required `expires_at` bounds the replay window (early revocation before expiry
+  still needs a revocation list — a documented residual). Stateful velocity/budget
   accounting
   is scoped by a key derived **only from the trusted mandate** (`mandate.id`, else a
   hash of its content) — never from an agent-controlled field, so a compromised agent

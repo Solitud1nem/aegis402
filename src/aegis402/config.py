@@ -89,8 +89,9 @@ class Settings(BaseSettings):
             "Opt-in: every payment must carry a mandate with a valid HMAC signature over "
             "its canonical content (see mandate_auth). The mandate is the trust anchor, so "
             "without this a prompt-injected agent could forge a permissive mandate. When "
-            "on, a missing/unsigned/invalid mandate — or no configured secret — fails "
-            "closed to BLOCK. Off by default for back-compat."
+            "on, a missing/unsigned/invalid mandate, one with no expiry (replay "
+            "protection), or no configured secret — fails closed to BLOCK. Off by default "
+            "for back-compat."
         ),
     )
     mandate_hmac_secret: str | None = Field(

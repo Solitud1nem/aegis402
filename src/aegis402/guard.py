@@ -114,6 +114,13 @@ class Guard:
             return self._fail_closed("signed mandate required but none was provided")
         if not verify_mandate(intent.mandate, secret):
             return self._fail_closed("mandate signature missing or invalid")
+        if intent.mandate.expires_at is None:
+            # A valid signature alone is replayable forever (and unrevocable). Requiring an
+            # expiry bounds the replay window in the signed-mandate posture; L3 then blocks
+            # any payment past it. Full early revocation still needs a revocation list.
+            return self._fail_closed(
+                "signed mandate must carry an expiry (replay protection)"
+            )
         return None
 
     @staticmethod
