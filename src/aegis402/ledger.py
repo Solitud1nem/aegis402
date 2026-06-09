@@ -25,6 +25,7 @@ from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from pathlib import Path
 
+from sqlalchemy import event
 from sqlmodel import Field, Session, SQLModel, create_engine, select
 
 from .config import Settings, get_settings
@@ -57,15 +58,28 @@ class SpendLedger:
     def __init__(self, settings: Settings | None = None) -> None:
         self._settings = settings or get_settings()
         path: Path = self._settings.db_path
-        # Multithread-safe SQLite: the guard runs under a threadpool (FastAPI) and the
-        # spend lock serializes pooled connections across threads (check_same_thread off);
-        # busy timeout makes a contended writer wait instead of erroring ("database is
-        # locked"), which would otherwise fail-closed into a spurious BLOCK.
+        # Multithread-safe SQLite (FastAPI threadpool): share pooled connections across
+        # threads (check_same_thread off); busy timeout makes a contended writer wait
+        # instead of erroring ("database is locked") into a spurious fail-closed BLOCK.
         self._engine = create_engine(
             f"sqlite:///{path}",
             echo=False,
             connect_args={"timeout": 30, "check_same_thread": False},
         )
+        # Make every transaction acquire the write lock up front (BEGIN IMMEDIATE). Without
+        # this, two transactions can both READ the spend window before either WRITES, so a
+        # plain transaction does not stop a velocity over-allow — across processes a
+        # per-process lock cannot help either. IMMEDIATE serializes the read→check→insert
+        # in try_reserve at the database level, the only place it is correct. (Documented
+        # SQLAlchemy recipe: disable pysqlite's autobegin, emit BEGIN IMMEDIATE ourselves.)
+        @event.listens_for(self._engine, "connect")
+        def _sqlite_autobegin_off(dbapi_conn: object, _rec: object) -> None:
+            dbapi_conn.isolation_level = None  # type: ignore[attr-defined]
+
+        @event.listens_for(self._engine, "begin")
+        def _sqlite_begin_immediate(conn: object) -> None:
+            conn.exec_driver_sql("BEGIN IMMEDIATE")  # type: ignore[attr-defined]
+
         SQLModel.metadata.create_all(self._engine)
 
     def record_spend(
@@ -80,6 +94,57 @@ class SpendLedger:
             session.refresh(record)
         assert record.id is not None  # populated by the DB on commit
         return record.id
+
+    def try_reserve(
+        self,
+        scope: str,
+        asset: str,
+        amount: int,
+        *,
+        velocity_cap: int | None = None,
+        window_seconds: int = 3600,
+        total_budget: int | None = None,
+        now: datetime | None = None,
+    ) -> bool:
+        """Atomically reserve ``amount`` against the configured caps for ``(scope, asset)``.
+
+        In a single BEGIN IMMEDIATE transaction (cross-process write lock): sum active
+        spend, and only if it stays within both the velocity window cap and the cumulative
+        budget, insert the pending row and return True; otherwise insert nothing and return
+        False. This closes the check-then-act race that a read in one transaction and a
+        write in another (or in another process/worker) leaves open. With no caps
+        configured it always reserves.
+        """
+        when = (now or datetime.now(UTC)).astimezone(UTC)
+        voided = SpendStatus.VOIDED.value
+        with self._engine.begin() as conn:
+            if velocity_cap is not None:
+                cutoff = (when - timedelta(seconds=window_seconds)).isoformat()
+                window = int(
+                    conn.exec_driver_sql(
+                        "SELECT COALESCE(SUM(amount), 0) FROM spend_ledger "
+                        "WHERE scope = ? AND asset = ? AND status != ? AND ts >= ?",
+                        (scope, asset, voided, cutoff),
+                    ).scalar_one()
+                )
+                if window + amount > velocity_cap:
+                    return False
+            if total_budget is not None:
+                total = int(
+                    conn.exec_driver_sql(
+                        "SELECT COALESCE(SUM(amount), 0) FROM spend_ledger "
+                        "WHERE scope = ? AND asset = ? AND status != ?",
+                        (scope, asset, voided),
+                    ).scalar_one()
+                )
+                if total + amount > total_budget:
+                    return False
+            conn.exec_driver_sql(
+                "INSERT INTO spend_ledger (scope, asset, amount, ts, status) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (scope, asset, amount, when.isoformat(), SpendStatus.PENDING.value),
+            )
+        return True
 
     def _set_status(self, spend_id: int, status: SpendStatus) -> bool:
         """Transition a record's status; return False if the id is unknown."""

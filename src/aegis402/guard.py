@@ -7,8 +7,6 @@ raw input and get back a :class:`Verdict` with evidence already persisted.
 from __future__ import annotations
 
 import logging
-import threading
-from contextlib import nullcontext
 from typing import Any
 
 from .config import Settings, get_settings
@@ -16,7 +14,7 @@ from .engine import DecisionEngine
 from .evidence import EvidenceLog
 from .interceptor import build_intent
 from .ledger import SpendLedger
-from .schemas import Intent, Verdict, VerdictType, resolve_spend_key
+from .schemas import Intent, Signal, Verdict, VerdictType, resolve_spend_key
 
 logger = logging.getLogger(__name__)
 
@@ -35,10 +33,6 @@ class Guard:
         self._engine = engine or DecisionEngine(self._settings)
         self._evidence = evidence or EvidenceLog(self._settings)
         self._ledger = ledger or SpendLedger(self._settings)
-        # Serializes the stateful L5 critical section (ledger read inside evaluate →
-        # decision → ledger write) so concurrent payments cannot each observe pre-write
-        # headroom and both ALLOW past the cap. Per-process only.
-        self._spend_lock = threading.Lock()
 
     def inspect(self, raw: dict[str, Any]) -> Verdict:
         """Normalize, evaluate and record a raw intent.
@@ -56,33 +50,51 @@ class Guard:
                 reason=f"invalid input (fail-closed BLOCK): {exc!s}",
             )
 
-        # L5 (velocity / budget) is check-then-act: the cap is read inside evaluate() and
-        # the spend written by _record_spend(). When a stateful limit is in effect, hold a
-        # lock across read→decide→write so two concurrent payments can't both see headroom
-        # and ALLOW past the cap. Stateless intents (the default) take no lock.
-        budget_set = intent.mandate is not None and intent.mandate.total_budget is not None
-        stateful = self._settings.velocity_cap is not None or budget_set
-        with self._spend_lock if stateful else nullcontext():
-            verdict = self._engine.evaluate(intent)
-            if verdict.verdict == VerdictType.ALLOW:
-                self._record_spend(intent)
+        verdict = self._engine.evaluate(intent)
+        if verdict.verdict == VerdictType.ALLOW:
+            verdict = self._reserve_or_block(intent, verdict)
         if self._evidence.should_record(verdict):
             self._evidence.record(intent, verdict)
         return verdict
 
-    def _record_spend(self, intent: Intent) -> None:
-        """Append an allowed payment to the spend ledger when velocity is in use.
+    def _reserve_or_block(self, intent: Intent, verdict: Verdict) -> Verdict:
+        """Atomically book an ALLOWed payment against velocity / budget caps.
 
-        Only records when a velocity cap or mandate budget is configured, so the
-        default (feature-off) path writes nothing. A ledger failure must not flip an
-        already-rendered ALLOW, so it is logged and swallowed.
+        When a stateful limit is configured, the spend is reserved in a single
+        cross-process-serialized transaction (:meth:`SpendLedger.try_reserve`). This is
+        the authoritative gate: the L5 read inside ``evaluate`` can be stale under
+        concurrency, so a payment that the engine cleared can still lose the reservation
+        race — in which case it is converted to a BLOCK rather than over-allowing past the
+        cap. With no stateful limit there is nothing to record and the ALLOW stands.
         """
-        budget_set = intent.mandate is not None and intent.mandate.total_budget is not None
-        if self._settings.velocity_cap is None and not budget_set:
-            return
+        budget = intent.mandate.total_budget if intent.mandate is not None else None
+        if self._settings.velocity_cap is None and budget is None:
+            return verdict
         scope = resolve_spend_key(intent.mandate, self._settings.velocity_default_key)
+        pi = intent.payment_intent
         try:
-            pi = intent.payment_intent
-            self._ledger.record_spend(scope, pi.asset, pi.amount)
-        except Exception:  # noqa: BLE001 — accounting must not break the verdict path.
-            logger.warning("Spend-ledger write failed for scope=%s", scope)
+            reserved = self._ledger.try_reserve(
+                scope,
+                pi.asset,
+                pi.amount,
+                velocity_cap=self._settings.velocity_cap,
+                window_seconds=self._settings.velocity_window_seconds,
+                total_budget=budget,
+            )
+        except Exception:  # noqa: BLE001 — a ledger error must fail closed, not over-allow.
+            logger.warning("Spend reservation failed for scope=%s (fail-closed)", scope)
+            reserved = False
+        if reserved:
+            return verdict
+        signal = Signal(
+            layer="L5",
+            score=self._settings.l5_signal_score,
+            reason="velocity/budget cap reached (atomic reserve lost the race)",
+            evidence={"scope": scope, "asset": pi.asset, "amount": pi.amount},
+        )
+        return Verdict(
+            verdict=VerdictType.BLOCK,
+            score=self._settings.l5_signal_score,
+            triggered_layers=[signal],
+            reason="hard block: velocity/budget cap reached",
+        )
