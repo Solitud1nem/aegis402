@@ -30,6 +30,13 @@ def test_inspect_blocks_attack() -> None:
     assert resp.json()["verdict"] == "BLOCK"
 
 
+def test_evidence_verify_endpoint_shape() -> None:
+    resp = client.get("/evidence/verify")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert "intact" in body and "first_broken_id" in body
+
+
 def test_reconcile_unknown_id_returns_ok_false() -> None:
     resp = client.post("/guard/reconcile", json={"spend_id": 987654321, "settled": False})
     assert resp.status_code == 200

@@ -46,3 +46,10 @@ def reconcile(req: ReconcileRequest) -> dict[str, Any]:
     """Settle or void a reserved spend so a never-settled payment frees its headroom."""
     ok = _guard.reconcile(req.spend_id, settled=req.settled)
     return {"ok": ok, "spend_id": req.spend_id, "settled": req.settled}
+
+
+@app.get("/evidence/verify")
+def verify_evidence() -> dict[str, Any]:
+    """Verify the evidence hash chain; report the first broken record if tampered."""
+    ok, broken_id = _guard.verify_evidence_chain()
+    return {"intact": ok, "first_broken_id": broken_id}

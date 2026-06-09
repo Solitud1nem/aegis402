@@ -151,3 +151,8 @@ class Guard:
         if settled:
             return self._ledger.mark_settled(spend_id)
         return self._ledger.void(spend_id)
+
+    def verify_evidence_chain(self) -> tuple[bool, str | None]:
+        """Verify the evidence hash chain; ``(True, None)`` if intact, else the first
+        broken record id. Lets an auditor detect in-place edits/deletions of the log."""
+        return self._evidence.verify_chain()
