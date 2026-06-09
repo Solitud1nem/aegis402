@@ -47,10 +47,14 @@ attacks that never pass through the payment path.
 | 13 | **Death by a thousand cuts** | many within-limit payments aggregating past intent over time | L5 (`velocity_window`) |
 | 14 | **Budget bypass** | cumulative spend exceeds the mandate's total budget | L5 (`total_budget`) |
 | 15 | **Payment after mandate expiry (TTL)** | reuse a mandate past its `expires_at` | L3 (`mandate_expired`) |
+| 16 | **Obfuscated recipient address** | attacker address spliced/split/homoglyph-spelled in untrusted text | L4 (`address_appears`) |
+| 17 | **Unaccountable recipient** | open-ended (no-allowlist) payment to an address with no traceable origin | L4 (REVIEW) |
 
-Rows 1–12 each map to a single-shot fixture in `tests/attack_suite/`. The stateful L5
-rows (13–14) and the TTL row (15) are exercised by `tests/test_velocity.py` and the
-velocity demo (§6), since they depend on prior ledger state rather than one payload.
+Rows 1–12 map to single-shot fixtures `01`–`12` in `tests/attack_suite/`; rows 16–17 to
+`13_provenance_spaced_address` / `14_provenance_split_address` (obfuscation) and the
+unanchored-recipient regression in `tests/test_engine.py`. The stateful L5 rows (13–14)
+and the TTL row (15) are exercised by `tests/test_velocity.py` and the velocity demo
+(§6), since they depend on prior ledger state rather than one payload.
 The redundancy is the point:
 **no single layer is a sole point of failure** (defense in depth). Recent research notes
 that single filters "may always fall for prompt injections", so we combine an injection
@@ -67,7 +71,13 @@ classifier with payment-aware policy and provenance — an attacker must defeat 
   allowlist, mandate limit, amount overshoot, recipient substitution
   (request → intent), new-address-large-amount.
 - **L4 Provenance check** — did the recipient come from the trusted request/allowlist,
-  or only from untrusted context? The latter is a strong red flag.
+  or only from untrusted context? The latter is a strong red flag. Recipient matching is
+  **obfuscation-tolerant** (`text_extract.address_appears`): the known recipient is
+  searched for in NFKC-normalized, confusable-folded, hex-collapsed text, so an attacker
+  cannot hide a present-in-the-text address with separators, punctuation, a dropped `0x`,
+  fullwidth digits, or Cyrillic/Greek homoglyphs. A recipient with **no** traceable
+  origin (not requested, not allowlisted, absent from all context) is *unaccountable* and
+  scores into the REVIEW band (`unanchored_recipient_score`) rather than passing silently.
 - **L5 Velocity / budget gate** — *stateful*: trailing-window spend rate and cumulative
   mandate budget per `(mandate scope, asset)`, read from an append-on-ALLOW spend
   ledger. Catches aggregate-over-time abuse no single-payment check can see. Opt-in
@@ -75,19 +85,57 @@ classifier with payment-aware policy and provenance — an attacker must defeat 
 
 The **decision engine** aggregates over *applicable* layers only — disabled or degraded
 layers (e.g. L2 off, L5 with no limits set) are excluded from the weighted mean so a
-sleeping layer cannot dilute risk. Then: any single layer ≥ `block_threshold` ⇒ BLOCK;
-a weighted aggregate ≥ `review_threshold`, or any high-stakes amount ⇒ REVIEW; else ALLOW.
+sleeping layer cannot dilute risk. Then:
+
+- a **payment-grounded** layer (L3/L4/L5) ≥ `block_threshold`, or any fail-closed error
+  ⇒ BLOCK. A **text-only** layer (L1/L2) does *not* hard-block on its own — matching
+  injection phrasing is not proof the *payment* was hijacked, so a quoted-but-not-acted-on
+  injection over a fully grounded payment is not a false BLOCK;
+- a grounded layer in `[review_threshold, block_threshold)` (e.g. an unaccountable
+  recipient), a weighted aggregate ≥ `review_threshold`, or any high-stakes amount
+  ⇒ REVIEW;
+- else ALLOW.
 
 ## 5. Residual risk / known limitations
 
 - **Semantic-only attacks** with a benign-looking, allowlisted payee and an in-range
   amount can pass — by construction the payment is policy-clean. L2 is the main guard
   here; high-stakes amounts still escalate to REVIEW.
-- **L1 phrasing** is English-centric; non-English injection relies on L3/L4 (which are
-  language-agnostic) and L2.
+- **L1 phrasing** is English-centric and pattern-based. Homoglyph / fullwidth / zero-width
+  spellings of override phrases are folded out before matching, but **spaced-out**
+  (`i g n o r e`) and **leetspeak** (`1gn0re`) phrasings still evade L1. This does not
+  change a payment verdict — a redirect is caught by L3/L4 regardless (see §5.1) — so L1
+  evasion alone is not an escape; novel phrasings are L2's job.
 - **Amount/address extraction** from free text is heuristic; a miss only *skips* a check
   (other layers still fire) — it never silently allows.
 - **No protection** for inbound payments or counterparty fraud scoring (out of MVP scope).
+
+### 5.1 Secondary-control boundaries (validated by white-box adversarial sweeps)
+
+`battle-test/adversarial.py` (recipient/provenance) and `battle-test/adversarial_seams.py`
+(L1/L3-amount/L5) generate attacks against each seam and classify every ALLOW by severity.
+The load-bearing invariant they enforce — **`attacker_escape == 0`**: no layer-evasion
+lets funds reach an attacker address — holds across all cells. The recipient pair
+(L3 allowlist + L4 provenance) is what stands between the attacker and the money; the
+other controls are bounded and only ever affect payments to a party the owner referenced:
+
+- **Amount inflation is bounded by the per-payment `limit`.** An inflated amount can only
+  reach a recipient the owner already trusts (allowlisted or named in the request) — to an
+  attacker it is caught by L3/L4 on the recipient. When the owner's intended amount is
+  unparseable (`"five USDC"`, or no amount stated) *and* no `limit` is set, the payment
+  can overpay that trusted party. The `limit` is the inflation defense, exactly as the
+  allowlist is the redirect defense; **autonomous mandates should set a per-payment
+  `limit`.**
+- **Velocity is bounded by configuration.** With no `velocity_cap` / `total_budget` there
+  is no rate defense (opt-in by design). Even when configured, budgets are tracked
+  **per `(scope, asset)`**: spend split across *different assets* is not aggregated,
+  because cross-asset summing needs a price oracle (out of scope offline). Same-asset
+  splitting within the window *is* caught.
+- **Per-payment limit / velocity cap are owner responsibilities.** The guard cannot
+  invent the owner's intent; it enforces the controls the mandate provides. The secure
+  configuration for an autonomous agent is **allowlist + per-payment `limit` (+
+  `velocity_cap` for rate)** — with all three set, the sweeps show no escape and no
+  bounded overpay.
 
 ### Limitations of L5 (velocity / budget)
 
