@@ -49,6 +49,8 @@ attacks that never pass through the payment path.
 | 15 | **Payment after mandate expiry (TTL)** | reuse a mandate past its `expires_at` | L3 (`mandate_expired`) |
 | 16 | **Obfuscated recipient address** | attacker address spliced/split/homoglyph-spelled in untrusted text | L4 (`address_appears`) |
 | 17 | **Unaccountable recipient** | open-ended (no-allowlist) payment to an address with no traceable origin | L4 (REVIEW) |
+| 18 | **Cross-rail redirect** | allowlisted payee but on a different network/asset where that address is a different party | L3 (`network_not_permitted` / `asset_not_permitted`, opt-in `mandate.networks` / `mandate.assets`) |
+| 19 | **Velocity bypass via asset casing** | same token spelled `USDC`/`usdc`/`USDC ` to split the rate window | interceptor asset canonicalization + L5 |
 
 Rows 1–12 map to single-shot fixtures `01`–`12` in `tests/attack_suite/`; rows 16–17 to
 `13_provenance_spaced_address` / `14_provenance_split_address` (obfuscation) and the
@@ -69,7 +71,8 @@ classifier with payment-aware policy and provenance — an attacker must defeat 
   **degrades gracefully** to L1+L3+L4 when unavailable (the default offline demo path).
 - **L3 Payment-policy gate** — language-agnostic checks on the *payment itself*:
   allowlist, mandate limit, amount overshoot, recipient substitution
-  (request → intent), new-address-large-amount.
+  (request → intent), new-address-large-amount, and opt-in network/asset confinement
+  (`mandate.networks` / `mandate.assets` — an allowlist authorizes a payee, not a rail).
 - **L4 Provenance check** — did the recipient come from the trusted request/allowlist,
   or only from untrusted context? The latter is a strong red flag. Recipient matching is
   **obfuscation-tolerant** (`text_extract.address_appears`): the known recipient is
@@ -153,10 +156,19 @@ other controls are bounded and only ever affect payments to a party the owner re
   a reconciliation id, and `mark_settled(id)` / `void(id)` confirm or reverse a payment —
   voided spend is excluded from accounting, freeing the headroom. Surfacing that id
   through the guard/adapter so a caller can reconcile automatically is post-hackathon.
-- **TOCTOU race.** L5 reads the ledger during detection, while the guard writes the
-  spend *after* the verdict. Concurrent inspects for the same scope can each read a
-  stale total and both pass, briefly exceeding the cap. Acceptable for the single-tenant
-  demo; production needs an atomic read-modify-write or per-scope serialization (#3).
+- **TOCTOU race — fixed.** L5 reads the ledger during detection, while the spend is
+  written *after* the verdict, so concurrent inspects for the same scope could each read a
+  stale total and both pass. Resolved by `SpendLedger.try_reserve`, which does the
+  read-check-insert in one `BEGIN IMMEDIATE` transaction: SQLite's write lock serializes
+  the critical section across threads **and processes** (uvicorn workers), and the guard
+  treats it as the authoritative gate — a payment the stale L5 read cleared but that loses
+  the reservation race is converted to BLOCK rather than over-allowing. Verified with
+  concurrent threads and real subprocesses against a shared DB.
+- **Asset-key canonicalization — fixed.** The ledger scopes by `(mandate, asset)`. The
+  asset symbol was used verbatim, so `"USDC"` / `"usdc"` / `"USDC "` keyed to separate
+  velocity windows for the same token — alternating the casing defeated the cap. The
+  interceptor now folds the asset (strip + uppercase) at the trust boundary so L3
+  confinement and L5 accounting share one key.
 - **Scope key trust.** Post mandate-scoping, the key derives only from the trusted
   mandate, so an agent can no longer reset it (the old agent-controlled `subject` field
   was removed). Residual: **without** a mandate, all spend shares one server-wide key per
