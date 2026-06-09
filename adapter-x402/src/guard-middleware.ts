@@ -22,6 +22,10 @@ export interface PaymentIntent {
 export interface Mandate {
   limit?: number | null;
   allowlist?: string[];
+  /** Permitted networks (chain ids); empty/omitted = unrestricted. */
+  networks?: string[];
+  /** Permitted asset symbols/contracts; empty/omitted = unrestricted. */
+  assets?: string[];
 }
 
 /** The guard's input: the payment plus the trusted request and untrusted sources. */

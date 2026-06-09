@@ -55,6 +55,15 @@ class Mandate(BaseModel):
     allowlist: list[str] = Field(
         default_factory=list, description="Permitted recipient addresses."
     )
+    networks: list[str] = Field(
+        default_factory=list,
+        description="Permitted networks (chain ids); empty = unrestricted. An allowlisted "
+        "recipient on an unlisted chain may be a different/attacker-controlled party.",
+    )
+    assets: list[str] = Field(
+        default_factory=list,
+        description="Permitted asset symbols/contracts; empty = unrestricted.",
+    )
     total_budget: int | None = Field(
         default=None,
         ge=0,
@@ -78,6 +87,8 @@ class Mandate(BaseModel):
         canonical = json.dumps(
             {
                 "allowlist": sorted(a.lower() for a in self.allowlist),
+                "networks": sorted(n.lower() for n in self.networks),
+                "assets": sorted(a.lower() for a in self.assets),
                 "limit": self.limit,
                 "total_budget": self.total_budget,
                 "expires_at": self.expires_at.isoformat() if self.expires_at else None,

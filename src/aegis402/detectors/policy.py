@@ -47,6 +47,26 @@ class PaymentPolicyGate:
             )
             score = max(score, 0.9)
 
+        # 2b. Network / asset confinement. The allowlist authorizes a *recipient*; it says
+        #     nothing about the *rail*. Without this, a mandate to pay vendor X on one chain
+        #     equally authorizes paying X on any chain / in any asset — and the same address
+        #     on a different chain (or an unexpected asset) can be a different, possibly
+        #     attacker-controlled, party. Empty list = unrestricted (back-compat).
+        if mandate and mandate.networks:
+            if pi.network.lower() not in {n.lower() for n in mandate.networks}:
+                violations.append(
+                    {"check": "network_not_permitted", "network": pi.network,
+                     "permitted": list(mandate.networks)}
+                )
+                score = max(score, 0.9)
+        if mandate and mandate.assets:
+            if pi.asset.lower() not in {a.lower() for a in mandate.assets}:
+                violations.append(
+                    {"check": "asset_not_permitted", "asset": pi.asset,
+                     "permitted": list(mandate.assets)}
+                )
+                score = max(score, 0.9)
+
         # 3. Recipient substitution: an address named in the owner's request that
         #    differs from where the agent is actually paying. Recipient-presence uses
         #    obfuscation-tolerant matching so an address the owner wrote with formatting

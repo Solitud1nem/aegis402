@@ -62,6 +62,47 @@ def test_benign_payment_passes() -> None:
     assert sig.score == 0.0
 
 
+def test_network_not_permitted_flagged() -> None:
+    """A mandate with a `networks` list blocks the allowlisted recipient on other chains."""
+    sig = PaymentPolicyGate().run(_intent({
+        "payment_intent": {"recipient": VENDOR, "amount": 5 * USDC, "asset": "USDC",
+                           "network": "ethereum-mainnet"},
+        "mandate": {"limit": 50 * USDC, "allowlist": [VENDOR], "networks": ["base-sepolia"]},
+    }))
+    assert sig.score >= 0.9
+    assert any(v["check"] == "network_not_permitted" for v in sig.evidence["violations"])
+
+
+def test_network_permitted_passes() -> None:
+    """On-network payment to an allowlisted recipient raises no L3 signal."""
+    sig = PaymentPolicyGate().run(_intent({
+        "payment_intent": {"recipient": VENDOR, "amount": 5 * USDC, "asset": "USDC",
+                           "network": "base-sepolia"},
+        "mandate": {"limit": 50 * USDC, "allowlist": [VENDOR], "networks": ["base-sepolia"]},
+    }))
+    assert sig.score == 0.0
+
+
+def test_asset_not_permitted_flagged() -> None:
+    """A mandate with an `assets` list blocks payment in an unlisted asset."""
+    sig = PaymentPolicyGate().run(_intent({
+        "payment_intent": {"recipient": VENDOR, "amount": 5 * USDC, "asset": "DAI",
+                           "network": "base-sepolia"},
+        "mandate": {"limit": 50 * USDC, "allowlist": [VENDOR], "assets": ["USDC"]},
+    }))
+    assert any(v["check"] == "asset_not_permitted" for v in sig.evidence["violations"])
+
+
+def test_empty_network_asset_lists_unrestricted() -> None:
+    """Back-compat: empty networks/assets lists impose no restriction."""
+    sig = PaymentPolicyGate().run(_intent({
+        "payment_intent": {"recipient": VENDOR, "amount": 5 * USDC, "asset": "DAI",
+                           "network": "any-l2"},
+        "mandate": {"limit": 50 * USDC, "allowlist": [VENDOR]},
+    }))
+    assert sig.score == 0.0
+
+
 def test_strict_mandate_off_allows_unbounded() -> None:
     """Default posture: a payment with no per-payment limit raises no L3 signal."""
     from aegis402.config import Settings
