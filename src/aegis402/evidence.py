@@ -45,7 +45,13 @@ class EvidenceLog:
     def __init__(self, settings: Settings | None = None) -> None:
         self._settings = settings or get_settings()
         path: Path = self._settings.db_path
-        self._engine = create_engine(f"sqlite:///{path}", echo=False)
+        # Multithread-safe SQLite (FastAPI threadpool): share pooled connections across
+        # threads and wait on a busy lock rather than erroring.
+        self._engine = create_engine(
+            f"sqlite:///{path}",
+            echo=False,
+            connect_args={"timeout": 30, "check_same_thread": False},
+        )
         SQLModel.metadata.create_all(self._engine)
 
     def record(self, intent: Intent, verdict: Verdict) -> str:

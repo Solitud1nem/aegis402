@@ -49,3 +49,36 @@ def test_within_window_cap_all_allow(tmp_path: Path) -> None:
     verdicts = [guard.inspect(_payment()) for _ in range(3)]
 
     assert all(v.verdict == VerdictType.ALLOW for v in verdicts)
+
+
+def test_concurrent_payments_do_not_overrun_cap(tmp_path: Path) -> None:
+    """Check-then-act race: many parallel 60-USDC payments must not both ALLOW past a
+    100-USDC cap. The guard's spend lock serializes read→decide→write, so total ALLOWed
+    spend stays within the cap (here: exactly one payment fits)."""
+    import threading
+
+    settings = Settings(db_path=tmp_path / "race.db", velocity_cap=100 * USDC)
+    guard = Guard(settings)
+
+    def pay(out: list, i: int) -> None:
+        # Self-consistent 60-USDC payment (no amount-overshoot vs the request); only L5
+        # should gate it, so the cap (not another layer) decides how many ALLOW.
+        p = {
+            "user_request": f"Pay 60 USDC to {VENDOR} for the metered API.",
+            "untrusted_context": [],
+            "payment_intent": {"recipient": VENDOR, "amount": 60 * USDC,
+                               "asset": "USDC", "network": "base-sepolia"},
+        }
+        out[i] = guard.inspect(p).verdict
+
+    n = 8
+    results: list = [None] * n
+    threads = [threading.Thread(target=pay, args=(results, i)) for i in range(n)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    allows = sum(1 for v in results if v == VerdictType.ALLOW)
+    assert allows == 1, f"expected exactly 1 ALLOW within the cap, got {allows}"
+    assert allows * 60 * USDC <= 100 * USDC

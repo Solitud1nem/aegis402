@@ -57,7 +57,15 @@ class SpendLedger:
     def __init__(self, settings: Settings | None = None) -> None:
         self._settings = settings or get_settings()
         path: Path = self._settings.db_path
-        self._engine = create_engine(f"sqlite:///{path}", echo=False)
+        # Multithread-safe SQLite: the guard runs under a threadpool (FastAPI) and the
+        # spend lock serializes pooled connections across threads (check_same_thread off);
+        # busy timeout makes a contended writer wait instead of erroring ("database is
+        # locked"), which would otherwise fail-closed into a spurious BLOCK.
+        self._engine = create_engine(
+            f"sqlite:///{path}",
+            echo=False,
+            connect_args={"timeout": 30, "check_same_thread": False},
+        )
         SQLModel.metadata.create_all(self._engine)
 
     def record_spend(
