@@ -11,16 +11,26 @@
  * Run:  pnpm demo:attack   |   pnpm demo:benign
  */
 
-import { createAegisGuard, GuardIntent, PaymentBlockedError } from "../src/guard-middleware.js";
+import {
+  createAegisGuard,
+  GuardIntent,
+  PaymentIntent,
+  PaymentBlockedError,
+} from "../src/guard-middleware.js";
 
 const VENDOR = "0x1111111111111111111111111111111111111111";
 const ATTACKER = "0x2222222222222222222222222222222222222222";
 const USDC = 1_000_000; // 6-dec minimal units per 1 USDC
 
-/** Stand-in for the real x402 sign + /settle step. Only reached on ALLOW. */
-async function signAndSettle(intent: GuardIntent): Promise<string> {
-  const p = intent.payment_intent;
-  console.log(`  🖊️  signing PaymentPayload → ${p.amount} ${p.asset} to ${p.recipient}`);
+/**
+ * Stand-in for the real x402 sign + /settle step. Only reached on ALLOW, and it
+ * signs the *verified* payment the guard handed back — never an independently-built
+ * one — so what settles is provably what was vetted.
+ */
+async function signAndSettle(verified: Readonly<PaymentIntent>): Promise<string> {
+  console.log(
+    `  🖊️  signing PaymentPayload → ${verified.amount} ${verified.asset} to ${verified.recipient}`,
+  );
   console.log("  ✅ settled via x402 facilitator");
   return "0xsettlement_tx_hash";
 }
@@ -54,7 +64,7 @@ async function main(): Promise<void> {
   console.log(`  agent intends to pay: ${intent.payment_intent.recipient}\n`);
 
   try {
-    await guard.guard(intent, () => signAndSettle(intent));
+    await guard.guard(intent, (verified) => signAndSettle(verified));
     console.log("\n→ payment completed.\n");
   } catch (err) {
     if (err instanceof PaymentBlockedError) {

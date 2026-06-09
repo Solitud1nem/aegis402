@@ -137,8 +137,17 @@ export interface AegisGuard {
    * Native x402 insertion point: inspect the intent, then run `signAndSettle`
    * only on ALLOW (or an approved REVIEW). Throws {@link PaymentBlockedError}
    * otherwise, so a blocked payment is never signed.
+   *
+   * `signAndSettle` receives the *exact* `payment_intent` the guard inspected
+   * (frozen). Build your x402 PaymentPayload from THIS argument — never from an
+   * independently-constructed payment — so what gets signed is provably what was
+   * vetted. The guard validates a payment description; it is only meaningful if the
+   * description and the execution cannot diverge.
    */
-  guard<T>(intent: GuardIntent, signAndSettle: () => Promise<T> | T): Promise<T>;
+  guard<T>(
+    intent: GuardIntent,
+    signAndSettle: (verified: Readonly<PaymentIntent>) => Promise<T> | T,
+  ): Promise<T>;
 }
 
 /** Create an {@link AegisGuard} pre-bound to the given options. */
@@ -147,12 +156,16 @@ export function createAegisGuard(options: AegisGuardOptions = {}): AegisGuard {
     inspect: (intent) => inspectPayment(intent, options),
     async guard(intent, signAndSettle) {
       const verdict = await inspectPayment(intent, options);
+      // Hand the callback the exact payment that was vetted, frozen so it cannot be
+      // mutated after approval. This binds execution to inspection: a caller cannot
+      // inspect a benign payment and then settle a different (e.g. attacker) one.
+      const verified = Object.freeze({ ...intent.payment_intent });
       if (verdict.verdict === "ALLOW") {
-        return signAndSettle();
+        return signAndSettle(verified);
       }
       if (verdict.verdict === "REVIEW") {
         const approved = options.onReview ? await options.onReview(intent, verdict) : false;
-        if (approved) return signAndSettle();
+        if (approved) return signAndSettle(verified);
       }
       throw new PaymentBlockedError(verdict);
     },
