@@ -10,7 +10,9 @@ from __future__ import annotations
 
 import pytest
 
-from aegis402.text_extract import address_appears, find_addresses
+from aegis402.text_extract import address_appears, find_addresses, find_requested_amount
+
+_DECIMALS = {"USDC": 6, "USDT": 6, "DAI": 18, "ETH": 18, "WETH": 18}
 
 ADDR = "0xA77ac1d00000000000000000000000000000bad1"
 ADDR_LC = ADDR.lower()
@@ -101,3 +103,35 @@ def test_no_false_address_from_prose() -> None:
 
 def test_no_false_address_from_short_hex() -> None:
     assert find_addresses("color #0xABCDEF and code 0xdeadbeef") == []
+
+
+def _amt(text: str, asset: str = "USDC") -> int | None:
+    return find_requested_amount(text, asset, _DECIMALS, 6)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Pay invoice 0 to our vendor.",  # "0 to" is not "0 TO-asset"
+        "Please pay for 3 items.",
+        "Pay 5 days of hosting.",
+        "Settle the 2 outstanding bills.",
+    ],
+)
+def test_no_false_amount_from_quantity_prose(text: str) -> None:
+    """A bare '<number> <word>' is a quantity, not a payment amount — must not parse,
+    or L3 amount-overshoot false-positives a benign request (tiny/zero ceiling)."""
+    assert _amt(text) is None
+
+
+def test_real_asset_amount_parsed() -> None:
+    assert _amt("Pay 50 USDC to vendor.") == 50_000_000
+
+
+def test_other_known_asset_amount_parsed() -> None:
+    """A recognized asset other than the paid one is still honored (ETH = 18 dec)."""
+    assert _amt("Pay 2.5 ETH to vendor.") == 2_500_000_000_000_000_000
+
+
+def test_paid_asset_preferred_over_prose_quantity() -> None:
+    assert _amt("Pay 50 USDC for 3 servers.") == 50_000_000

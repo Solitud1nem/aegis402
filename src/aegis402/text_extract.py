@@ -111,11 +111,22 @@ def find_requested_amount(
     """Extract the amount the owner asked for, in minimal units, if discernible.
 
     Prefers a number explicitly attached to ``asset``; otherwise falls back to the
-    first amount-with-asset match. Returns None when no amount is found.
+    first match whose unit is a *recognized* asset symbol. Returns None when no amount
+    is found.
+
+    The unit must be the paid asset or a known asset (``decimals_for``); a bare
+    "<number> <short word>" in prose — "0 to", "3 items", "5 days" — is a quantity,
+    not a payment amount, and is ignored. Honoring those produced a tiny/zero ceiling
+    that false-positived L3 amount-overshoot on benign requests. Skipping an unknown
+    unit is safe: it only drops the overshoot check (the limit/allowlist still apply);
+    the owner does not control the amount in an attack, so no escape is introduced.
     """
     asset_u = asset.upper()
+    known = {a.upper() for a in decimals_for}
     candidates: list[tuple[str, str]] = [
-        (m.group("num"), m.group("asset").upper()) for m in _AMOUNT_WITH_ASSET.finditer(text)
+        (m.group("num"), m.group("asset").upper())
+        for m in _AMOUNT_WITH_ASSET.finditer(text)
+        if m.group("asset").upper() == asset_u or m.group("asset").upper() in known
     ]
     if not candidates:
         return None
