@@ -53,6 +53,9 @@ def build_intent(raw: dict[str, Any]) -> Intent:
     # — once, at the trust boundary — keeps every layer (L3 confinement, L5 accounting) on
     # the same key.
     intent.payment_intent.asset = intent.payment_intent.asset.strip().upper()
+    # Strip surrounding whitespace from the network id so " base-sepolia" does not miss a
+    # mandate's `networks` confinement (case is folded at compare time).
+    intent.payment_intent.network = intent.payment_intent.network.strip()
     if intent.mandate is not None:
         intent.mandate.allowlist = [_normalize_address(a) for a in intent.mandate.allowlist]
     return intent

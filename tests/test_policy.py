@@ -93,6 +93,17 @@ def test_asset_not_permitted_flagged() -> None:
     assert any(v["check"] == "asset_not_permitted" for v in sig.evidence["violations"])
 
 
+def test_network_whitespace_does_not_falsely_violate() -> None:
+    """A network id with surrounding whitespace is stripped at the boundary, so it still
+    matches a mandate's `networks` confinement instead of false-positiving."""
+    sig = PaymentPolicyGate().run(_intent({
+        "payment_intent": {"recipient": VENDOR, "amount": 5 * USDC, "asset": "USDC",
+                           "network": " base-sepolia "},
+        "mandate": {"limit": 50 * USDC, "allowlist": [VENDOR], "networks": ["base-sepolia"]},
+    }))
+    assert sig.score == 0.0
+
+
 def test_empty_network_asset_lists_unrestricted() -> None:
     """Back-compat: empty networks/assets lists impose no restriction."""
     sig = PaymentPolicyGate().run(_intent({

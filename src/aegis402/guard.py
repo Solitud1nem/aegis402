@@ -51,6 +51,8 @@ class Guard:
                 reason=f"invalid input (fail-closed BLOCK): {exc!s}",
             )
 
+        self._bound_untrusted(intent)
+
         # Authenticate the mandate before any detector trusts it: a forged/escalated
         # mandate must never reach the (mandate-trusting) policy layers.
         mandate_block = self._check_mandate_auth(intent)
@@ -65,6 +67,34 @@ class Guard:
         if self._evidence.should_record(verdict):
             self._evidence.record(intent, verdict)
         return verdict
+
+    def _bound_untrusted(self, intent: Intent) -> None:
+        """Truncate untrusted_context to the configured char budget before scanning.
+
+        Bounds detector CPU on attacker-controlled bulk text (defense-in-depth atop the
+        bounded regexes). Truncation can only weaken detection toward REVIEW (e.g. an
+        address buried past the cap), never toward a silent ALLOW.
+        """
+        cap = self._settings.max_untrusted_chars
+        kept: list[str] = []
+        remaining = cap
+        truncated = False
+        for entry in intent.untrusted_context:
+            if remaining <= 0:
+                truncated = True
+                break
+            if len(entry) > remaining:
+                kept.append(entry[:remaining])
+                remaining = 0
+                truncated = True
+            else:
+                kept.append(entry)
+                remaining -= len(entry)
+        if truncated:
+            logger.warning(
+                "Untrusted context exceeded %d chars; truncated for scanning.", cap
+            )
+            intent.untrusted_context = kept
 
     def _check_mandate_auth(self, intent: Intent) -> Verdict | None:
         """Fail-closed BLOCK when signed mandates are required and verification fails.

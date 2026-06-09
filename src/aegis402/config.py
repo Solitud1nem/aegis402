@@ -101,6 +101,17 @@ class Settings(BaseSettings):
             "require_signed_mandate is on."
         ),
     )
+    max_untrusted_chars: int = Field(
+        default=1_000_000,
+        ge=0,
+        description=(
+            "Cap on total untrusted_context characters the detectors scan. Excess is "
+            "truncated before evaluation so attacker-controlled bulk text cannot drive a "
+            "CPU/DoS (defense-in-depth atop bounded regexes). Generous default; legitimate "
+            "agent context is far smaller. A buried address dropped by truncation degrades "
+            "L4 to REVIEW, never to a silent ALLOW."
+        ),
+    )
 
     # --- L1 pattern scanner -----------------------------------------------------
     l1_signal_score: float = Field(
