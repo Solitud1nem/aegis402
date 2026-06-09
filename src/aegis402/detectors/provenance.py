@@ -45,11 +45,17 @@ class ProvenanceCheck:
                 evidence={"recipient": intent.payment_intent.recipient, "origin": "untrusted"},
             )
 
-        if not in_request and not allowlisted and intent.user_request.strip():
+        if not in_request and not allowlisted:
             # Recipient is neither requested, allowlisted, nor present in any context the
             # guard saw — its origin is unaccountable. Scored into the REVIEW band (see
             # Settings.unanchored_recipient_score) so an autonomous agent cannot silently
             # pay an address it cannot justify; a human confirms instead.
+            #
+            # Deliberately NOT gated on a non-empty user_request: an empty/whitespace
+            # request means there is *no* trusted anchor to trace the recipient to, which
+            # is strictly *more* suspicious, not less. Gating on user_request.strip() let a
+            # fully-autonomous agent (no per-call prompt) silently ALLOW a redirected,
+            # non-allowlisted payment in the open regime — a red-team escape.
             return Signal(
                 layer=self.layer,
                 score=self._settings.unanchored_recipient_score,

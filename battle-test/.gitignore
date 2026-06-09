@@ -1,0 +1,6 @@
+# Upstream clone (per README: git clone ... InjecAgent) — not ours to commit
+InjecAgent/
+
+# Evidence DBs and caches
+*.db
+__pycache__/
