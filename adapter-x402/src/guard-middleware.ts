@@ -50,6 +50,8 @@ export interface Verdict {
   score: number;
   reason: string;
   evidence_id?: string | null;
+  /** Ledger reservation id for an ALLOW that booked stateful spend; pass to `reconcile`. */
+  spend_id?: number | null;
   triggered_layers: Signal[];
 }
 
@@ -182,6 +184,13 @@ export interface AegisGuard {
     intent: GuardIntent,
     signAndSettle: (verified: Readonly<PaymentIntent>) => Promise<T> | T,
   ): Promise<T>;
+  /**
+   * Reconcile a reserved spend once its on-chain fate is known: `settled=true` confirms
+   * it, `settled=false` voids it so a never-settled payment frees its velocity/budget
+   * headroom instead of over-blocking later ones. Use `Verdict.spend_id` from an ALLOW.
+   * Returns the core's `ok` flag (false for an unknown id or on transport failure).
+   */
+  reconcile(spendId: number, settled: boolean): Promise<boolean>;
 }
 
 /** Create an {@link AegisGuard} pre-bound to the given options. */
@@ -202,6 +211,27 @@ export function createAegisGuard(options: AegisGuardOptions = {}): AegisGuard {
         if (approved) return signAndSettle(verified);
       }
       throw new PaymentBlockedError(verdict);
+    },
+    async reconcile(spendId, settled) {
+      const endpoint = options.endpoint ?? DEFAULTS.endpoint;
+      const timeoutMs = options.timeoutMs ?? DEFAULTS.timeoutMs;
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), timeoutMs);
+      try {
+        const resp = await fetch(`${endpoint}/guard/reconcile`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ spend_id: spendId, settled }),
+          signal: controller.signal,
+        });
+        if (!resp.ok) return false;
+        const body = (await resp.json()) as { ok?: boolean };
+        return body.ok === true;
+      } catch {
+        return false;
+      } finally {
+        clearTimeout(timer);
+      }
     },
   };
 }

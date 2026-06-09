@@ -112,7 +112,7 @@ class Guard:
         scope = resolve_spend_key(intent.mandate, self._settings.velocity_default_key)
         pi = intent.payment_intent
         try:
-            reserved = self._ledger.try_reserve(
+            spend_id = self._ledger.try_reserve(
                 scope,
                 pi.asset,
                 pi.amount,
@@ -122,9 +122,11 @@ class Guard:
             )
         except Exception:  # noqa: BLE001 — a ledger error must fail closed, not over-allow.
             logger.warning("Spend reservation failed for scope=%s (fail-closed)", scope)
-            reserved = False
-        if reserved:
-            return verdict
+            spend_id = None
+        if spend_id is not None:
+            # Surface the reservation id so the caller can reconcile (settle/void) if the
+            # payment ultimately does or does not settle on-chain.
+            return verdict.model_copy(update={"spend_id": spend_id})
         signal = Signal(
             layer="L5",
             score=self._settings.l5_signal_score,
@@ -137,3 +139,15 @@ class Guard:
             triggered_layers=[signal],
             reason="hard block: velocity/budget cap reached",
         )
+
+    def reconcile(self, spend_id: int, *, settled: bool) -> bool:
+        """Reconcile a reserved spend once its on-chain fate is known.
+
+        ``settled=True`` confirms it (stays counted); ``settled=False`` voids it (frees the
+        window/budget headroom a never-settled payment would otherwise hold). Returns False
+        for an unknown id. Closes the "approved ≠ settled" ghost-spend gap: without this a
+        payment the guard ALLOWed but that never settled would over-block later payments.
+        """
+        if settled:
+            return self._ledger.mark_settled(spend_id)
+        return self._ledger.void(spend_id)

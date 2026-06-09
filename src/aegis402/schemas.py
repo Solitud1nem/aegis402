@@ -180,4 +180,10 @@ class Verdict(BaseModel):
     evidence_id: str | None = Field(
         default=None, description="Evidence-log id for BLOCK/REVIEW outcomes."
     )
+    spend_id: int | None = Field(
+        default=None,
+        description="Ledger reservation id for an ALLOW that booked stateful spend. Pass it "
+        "back to reconcile (settle/void) so a payment that never settles frees its "
+        "headroom instead of over-blocking later payments.",
+    )
     reason: str = Field(default="", description="Short summary of why this verdict was reached.")

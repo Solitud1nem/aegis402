@@ -105,15 +105,15 @@ class SpendLedger:
         window_seconds: int = 3600,
         total_budget: int | None = None,
         now: datetime | None = None,
-    ) -> bool:
+    ) -> int | None:
         """Atomically reserve ``amount`` against the configured caps for ``(scope, asset)``.
 
         In a single BEGIN IMMEDIATE transaction (cross-process write lock): sum active
         spend, and only if it stays within both the velocity window cap and the cumulative
-        budget, insert the pending row and return True; otherwise insert nothing and return
-        False. This closes the check-then-act race that a read in one transaction and a
-        write in another (or in another process/worker) leaves open. With no caps
-        configured it always reserves.
+        budget, insert the pending row and return its reconciliation id; otherwise insert
+        nothing and return None. This closes the check-then-act race that a read in one
+        transaction and a write in another (or in another process/worker) leaves open. With
+        no caps configured it always reserves.
         """
         when = (now or datetime.now(UTC)).astimezone(UTC)
         voided = SpendStatus.VOIDED.value
@@ -128,7 +128,7 @@ class SpendLedger:
                     ).scalar_one()
                 )
                 if window + amount > velocity_cap:
-                    return False
+                    return None
             if total_budget is not None:
                 total = int(
                     conn.exec_driver_sql(
@@ -138,13 +138,13 @@ class SpendLedger:
                     ).scalar_one()
                 )
                 if total + amount > total_budget:
-                    return False
-            conn.exec_driver_sql(
+                    return None
+            result = conn.exec_driver_sql(
                 "INSERT INTO spend_ledger (scope, asset, amount, ts, status) "
                 "VALUES (?, ?, ?, ?, ?)",
                 (scope, asset, amount, when.isoformat(), SpendStatus.PENDING.value),
             )
-        return True
+            return int(result.lastrowid)
 
     def _set_status(self, spend_id: int, status: SpendStatus) -> bool:
         """Transition a record's status; return False if the id is unknown."""

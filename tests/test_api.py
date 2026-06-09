@@ -30,6 +30,13 @@ def test_inspect_blocks_attack() -> None:
     assert resp.json()["verdict"] == "BLOCK"
 
 
+def test_reconcile_unknown_id_returns_ok_false() -> None:
+    resp = client.post("/guard/reconcile", json={"spend_id": 987654321, "settled": False})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["ok"] is False and body["spend_id"] == 987654321
+
+
 def test_inspect_allows_benign() -> None:
     resp = client.post("/guard/inspect", json={
         "user_request": f"Pay 5 USDC to {VENDOR}.",

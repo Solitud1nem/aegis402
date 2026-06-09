@@ -51,6 +51,33 @@ def test_within_window_cap_all_allow(tmp_path: Path) -> None:
     assert all(v.verdict == VerdictType.ALLOW for v in verdicts)
 
 
+def test_allow_surfaces_spend_id_and_void_frees_headroom(tmp_path: Path) -> None:
+    """An ALLOW that books stateful spend returns a spend_id; voiding it (settlement
+    failed) frees the window so a later payment that would have exceeded the cap passes."""
+    settings = Settings(db_path=tmp_path / "rec.db", velocity_cap=100 * USDC)
+    guard = Guard(settings)
+
+    def pay() -> object:
+        return guard.inspect({
+            "user_request": f"Pay 60 USDC to {VENDOR}.",
+            "untrusted_context": [],
+            "payment_intent": {"recipient": VENDOR, "amount": 60 * USDC,
+                               "asset": "USDC", "network": "base-sepolia"},
+            "mandate": {"id": "agent-1", "allowlist": [VENDOR]},
+        })
+
+    first = pay()
+    assert first.verdict == VerdictType.ALLOW
+    assert isinstance(first.spend_id, int)
+    # A second 60 (120 > 100) is blocked while the first reservation stands.
+    assert pay().verdict == VerdictType.BLOCK
+    # Void the first (it never settled) -> headroom freed -> the next 60 fits again.
+    assert guard.reconcile(first.spend_id, settled=False) is True
+    assert pay().verdict == VerdictType.ALLOW
+    # Reconciling an unknown id is a no-op False.
+    assert guard.reconcile(999_999, settled=False) is False
+
+
 def test_asset_casing_does_not_split_velocity_window(tmp_path: Path) -> None:
     """Alternating the asset string's case/whitespace must not create fresh windows: the
     interceptor canonicalizes the asset, so the same token aggregates under one cap."""
