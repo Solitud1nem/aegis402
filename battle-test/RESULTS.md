@@ -3,6 +3,25 @@
 Run date: 2026-06-08. Aegis run in-process (`import aegis402`), offline (L2 ML layer
 off). Kill-criteria (set before the run): recall (BLOCK|REVIEW) ≥ 80 %, FPR ≤ 15 %.
 
+## Hardening round (2026-06-09) — red-team find→fix pass
+
+A source-level red-team of the guard found and fixed a series of real issues; each has a
+regression test and (where applicable) a probe under `battle-test/`. Money-loss escapes
+closed: L4 empty-`user_request` provenance bypass; cross-process velocity over-allow
+(atomic `BEGIN IMMEDIATE` reserve); velocity-cap bypass via asset-string casing; mandate
+forgery (opt-in HMAC `require_signed_mandate` + required expiry + revocation). Structural:
+the adapter now binds `signAndSettle` to the vetted payment. Robustness/integrity: L3
+network/asset confinement; amount-precision rejection; ghost-spend reconciliation
+(`spend_id` + `/guard/reconcile`); L1 HTML-comment ReDoS (O(n²)→linear); untrusted-context
+size cap; evidence log made a verifiable hash chain (`/evidence/verify`); FPR fixes
+(quantity-prose amounts, network whitespace).
+
+Post-round state: **pytest 140 passed**; consolidated board (`python regression.py`) all
+PASS — corpora below unchanged at 100 % / 0 %, white-box guarded escape 0 %, seams
+attacker-escape 0, LLM-adversary 0/6. See `docs/threat-model.md` for per-item detail.
+
+---
+
 ## Headline (as-is: owner provides a mandate with allowlist + per-payment limit)
 
 Numbers below are **after** the engine fix described under "The one false positive".
