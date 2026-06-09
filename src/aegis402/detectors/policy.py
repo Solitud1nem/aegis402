@@ -103,6 +103,16 @@ class PaymentPolicyGate:
                 )
                 score = max(score, 0.9)
 
+        # 7. Strict-mandate posture (opt-in): every payment must be bounded by a
+        #    per-payment limit. Unbounded payments get a REVIEW-band score (not BLOCK), so
+        #    a human confirms rather than the agent silently ALLOWing an uncapped payment.
+        if self._settings.strict_mandate and (mandate is None or mandate.limit is None):
+            violations.append({"check": "missing_payment_limit", "strict_mandate": True})
+            review_band = (
+                self._settings.review_threshold + self._settings.block_threshold
+            ) / 2
+            score = max(score, review_band)
+
         if not violations:
             return Signal(layer=self.layer, score=0.0, reason="payment policy satisfied")
 

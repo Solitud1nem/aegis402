@@ -136,6 +136,12 @@ other controls are bounded and only ever affect payments to a party the owner re
   configuration for an autonomous agent is **allowlist + per-payment `limit` (+
   `velocity_cap` for rate)** — with all three set, the sweeps show no escape and no
   bounded overpay.
+- **Strict posture (opt-in lever).** Setting `strict_mandate=True` makes the secure
+  configuration enforceable rather than advisory: any payment whose mandate lacks a
+  per-payment `limit` (including a no-mandate payment) is routed to **REVIEW** instead of
+  ALLOW, so an unbounded autonomous payment cannot pass without a human. Off by default,
+  so open-ended/no-mandate flows keep working; a deployment that *is* autonomous turns it
+  on to require every payment to be capped. Real policy violations still BLOCK as before.
 
 ### Limitations of L5 (velocity / budget)
 

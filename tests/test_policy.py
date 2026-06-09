@@ -60,3 +60,53 @@ def test_allowlist_violation_flagged() -> None:
 def test_benign_payment_passes() -> None:
     sig = PaymentPolicyGate().run(_intent({}))
     assert sig.score == 0.0
+
+
+def test_strict_mandate_off_allows_unbounded() -> None:
+    """Default posture: a payment with no per-payment limit raises no L3 signal."""
+    from aegis402.config import Settings
+
+    sig = PaymentPolicyGate(Settings(strict_mandate=False)).run(
+        _intent({"mandate": {"allowlist": [VENDOR]}})
+    )
+    assert sig.score == 0.0
+
+
+def test_strict_mandate_flags_missing_limit_in_review_band() -> None:
+    """Strict posture: no per-payment limit -> a REVIEW-band (not BLOCK) L3 signal."""
+    from aegis402.config import Settings
+
+    s = Settings(strict_mandate=True)
+    sig = PaymentPolicyGate(s).run(_intent({"mandate": {"allowlist": [VENDOR]}}))
+    assert s.review_threshold <= sig.score < s.block_threshold
+    assert any(v["check"] == "missing_payment_limit" for v in sig.evidence["violations"])
+
+
+def test_strict_mandate_satisfied_by_limit() -> None:
+    """Strict posture: a per-payment limit clears the requirement."""
+    from aegis402.config import Settings
+
+    sig = PaymentPolicyGate(Settings(strict_mandate=True)).run(
+        _intent({"mandate": {"allowlist": [VENDOR], "limit": 10 * USDC}})
+    )
+    assert sig.score == 0.0
+
+
+def test_strict_mandate_end_to_end_reviews_unbounded_payment() -> None:
+    """Guard-level: strict mode routes an unbounded payment to REVIEW, not ALLOW."""
+    import tempfile
+    from pathlib import Path
+
+    from aegis402.config import Settings
+    from aegis402.guard import Guard
+    from aegis402.schemas import VerdictType
+
+    guard = Guard(Settings(db_path=Path(tempfile.mkdtemp()) / "s.db", strict_mandate=True))
+    verdict = guard.inspect({
+        "user_request": f"Pay 5 USDC to {VENDOR}.",
+        "untrusted_context": ["Invoice: 5 USDC due."],
+        "payment_intent": {"recipient": VENDOR, "amount": 5 * USDC, "asset": "USDC",
+                           "network": "base-sepolia"},
+        "mandate": {"allowlist": [VENDOR]},
+    })
+    assert verdict.verdict == VerdictType.REVIEW

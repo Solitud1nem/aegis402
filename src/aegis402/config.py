@@ -72,6 +72,17 @@ class Settings(BaseSettings):
         default=True,
         description="On detector error/timeout, treat as risk and lean to BLOCK.",
     )
+    strict_mandate: bool = Field(
+        default=False,
+        description=(
+            "Opt-in deployment posture for autonomous agents. When True, a payment whose "
+            "mandate does not bound it with a per-payment 'limit' is escalated to REVIEW "
+            "(never silent ALLOW): an unbounded payment must be confirmed by a human. Off "
+            "by default so open-ended/no-mandate flows keep working; turn it on to require "
+            "every autonomous payment to carry a cap. Rate limiting remains separate "
+            "('velocity_cap')."
+        ),
+    )
 
     # --- L1 pattern scanner -----------------------------------------------------
     l1_signal_score: float = Field(
