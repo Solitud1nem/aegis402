@@ -229,7 +229,8 @@ Prereqs: `uv venv && uv pip install -e ".[dev]"`.
    An untrusted "remittance address changed" note with **no injection phrasing** and no
    in-request address: L1/L2 (text guards) see nothing, L3 is policy-clean, and **L4
    provenance is the sole catcher** → BLOCK. Then prints the tamper-evident evidence
-   (intended vs attempted + input hash) and its EAS attestation payload.
+   (intended vs attempted + input hash, hash-chained — verify via `GET /evidence/verify`)
+   and its EAS attestation payload.
 8. **Detection benchmark** — honest per-category metrics on a labeled corpus:
    ```bash
    uv run python scripts/benchmark.py     # writes docs/benchmark-results.md

@@ -29,7 +29,8 @@ the recipient and amount are already swapped. Aegis402 catches that.
 
 A **decision engine** aggregates the signals (any strong layer → BLOCK; high-stakes
 amount → REVIEW), and every BLOCK/REVIEW is written to a tamper-evident **evidence log**
-(SQLite, sha256 of input, `intended vs attempted` diff, JSON-exportable for a future
+(SQLite, hash-chained records — sha256 of input + `prev_hash` linkage, verifiable via
+`GET /evidence/verify`; `intended vs attempted` diff, JSON-exportable for a future
 on-chain EAS attestation).
 
 The guard **never holds private keys and never signs** — it only renders a verdict, and
