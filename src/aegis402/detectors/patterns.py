@@ -7,10 +7,37 @@ untrusted context. Pure-CPU and sub-millisecond; works with the ML layer off.
 
 from __future__ import annotations
 
+import unicodedata
+
 import regex as re
 
 from ..config import Settings, get_settings
 from ..schemas import Intent, Signal
+
+# Cyrillic / Greek look-alikes for Latin letters, folded so a homoglyph-spelled override
+# phrase ("іgnore prevіous іnstructions" with Cyrillic i/о/е) still matches the patterns.
+# Letters only (never letter->digit) so ordinary text is not corrupted. NFKC (applied
+# first) folds fullwidth / compatibility forms.
+_LATIN_CONFUSABLES = str.maketrans(
+    {
+        "а": "a", "ӏ": "l", "в": "b", "с": "c", "ԁ": "d", "е": "e", "ё": "e", "ғ": "f",
+        "һ": "h", "і": "i", "ј": "j", "к": "k", "м": "m", "н": "h", "о": "o", "р": "p",
+        "ԛ": "q", "ѕ": "s", "т": "t", "у": "y", "х": "x", "г": "r", "ӗ": "e",
+        "α": "a", "β": "b", "ε": "e", "ι": "i", "κ": "k", "μ": "m", "ν": "v", "ο": "o",
+        "ρ": "p", "τ": "t", "υ": "u", "χ": "x",
+    }
+)
+
+
+def _deconfuse(text: str) -> str:
+    """Normalize text for injection-phrase matching: NFKC + lowercase + confusable fold.
+
+    Defeats homoglyph and fullwidth obfuscation of override phrases. Hidden/zero-width
+    characters are handled separately (and flagged) by the scanner, so they are stripped
+    here too, letting a phrase broken by zero-width joiners still match.
+    """
+    folded = unicodedata.normalize("NFKC", text).lower().translate(_LATIN_CONFUSABLES)
+    return str(_HIDDEN_CHARS.sub("", folded))
 
 # Known injection / jailbreak phrasings. Kept broad but specific enough to avoid
 # matching ordinary prose. Case-insensitive, unicode-aware.
@@ -61,9 +88,12 @@ class PatternScanner:
         """Scan untrusted context for injection signatures and hidden characters."""
         hits: list[dict[str, str]] = []
         joined = "\n".join(intent.untrusted_context)
+        # Phrase patterns run over a deconfused copy (homoglyph/fullwidth/zero-width
+        # folded); structural checks below run over the original text.
+        deconfused = _deconfuse(joined)
 
         for pattern, label in _COMPILED:
-            m = pattern.search(joined)
+            m = pattern.search(deconfused)
             if m:
                 hits.append({"type": label, "match": m.group(0)[:120]})
 
