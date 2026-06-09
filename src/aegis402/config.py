@@ -83,6 +83,24 @@ class Settings(BaseSettings):
             "('velocity_cap')."
         ),
     )
+    require_signed_mandate: bool = Field(
+        default=False,
+        description=(
+            "Opt-in: every payment must carry a mandate with a valid HMAC signature over "
+            "its canonical content (see mandate_auth). The mandate is the trust anchor, so "
+            "without this a prompt-injected agent could forge a permissive mandate. When "
+            "on, a missing/unsigned/invalid mandate — or no configured secret — fails "
+            "closed to BLOCK. Off by default for back-compat."
+        ),
+    )
+    mandate_hmac_secret: str | None = Field(
+        default=None,
+        description=(
+            "Server-side secret (env AEGIS_MANDATE_HMAC_SECRET) used to verify mandate "
+            "signatures. Lives only in config, never in the request payload. Required when "
+            "require_signed_mandate is on."
+        ),
+    )
 
     # --- L1 pattern scanner -----------------------------------------------------
     l1_signal_score: float = Field(

@@ -14,6 +14,7 @@ from .engine import DecisionEngine
 from .evidence import EvidenceLog
 from .interceptor import build_intent
 from .ledger import SpendLedger
+from .mandate_auth import verify_mandate
 from .schemas import Intent, Signal, Verdict, VerdictType, resolve_spend_key
 
 logger = logging.getLogger(__name__)
@@ -50,12 +51,50 @@ class Guard:
                 reason=f"invalid input (fail-closed BLOCK): {exc!s}",
             )
 
+        # Authenticate the mandate before any detector trusts it: a forged/escalated
+        # mandate must never reach the (mandate-trusting) policy layers.
+        mandate_block = self._check_mandate_auth(intent)
+        if mandate_block is not None:
+            if self._evidence.should_record(mandate_block):
+                self._evidence.record(intent, mandate_block)
+            return mandate_block
+
         verdict = self._engine.evaluate(intent)
         if verdict.verdict == VerdictType.ALLOW:
             verdict = self._reserve_or_block(intent, verdict)
         if self._evidence.should_record(verdict):
             self._evidence.record(intent, verdict)
         return verdict
+
+    def _check_mandate_auth(self, intent: Intent) -> Verdict | None:
+        """Fail-closed BLOCK when signed mandates are required and verification fails.
+
+        Returns None to proceed. Enabled by ``Settings.require_signed_mandate``; the
+        mandate is the trust anchor, so an unverifiable one is treated as untrusted input
+        rather than honored.
+        """
+        if not self._settings.require_signed_mandate:
+            return None
+        secret = self._settings.mandate_hmac_secret
+        if not secret:
+            return self._fail_closed(
+                "signed mandate required but no verification secret is configured"
+            )
+        if intent.mandate is None:
+            return self._fail_closed("signed mandate required but none was provided")
+        if not verify_mandate(intent.mandate, secret):
+            return self._fail_closed("mandate signature missing or invalid")
+        return None
+
+    @staticmethod
+    def _fail_closed(reason: str) -> Verdict:
+        """A fail-closed BLOCK verdict carrying ``reason``."""
+        logger.warning("Mandate auth fail-closed BLOCK: %s", reason)
+        return Verdict(
+            verdict=VerdictType.BLOCK,
+            score=1.0,
+            reason=f"fail-closed BLOCK: {reason}",
+        )
 
     def _reserve_or_block(self, intent: Intent, verdict: Verdict) -> Verdict:
         """Atomically book an ALLOWed payment against velocity / budget caps.

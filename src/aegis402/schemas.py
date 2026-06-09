@@ -73,6 +73,30 @@ class Mandate(BaseModel):
         default=None,
         description="Mandate expiry (TTL). Payments after this instant are rejected.",
     )
+    signature: str | None = Field(
+        default=None,
+        description="Owner's HMAC signature over canonical_content(); verified when "
+        "Settings.require_signed_mandate is on so a compromised agent cannot forge or "
+        "escalate the mandate. Not part of the signed content itself.",
+    )
+
+    def canonical_content(self) -> str:
+        """Deterministic JSON over every trust-relevant policy field (excluding the
+        signature). What the owner signs and the guard verifies — so the allowlist,
+        caps, rail confinement and expiry cannot be tampered with in transit."""
+        return json.dumps(
+            {
+                "id": self.id,
+                "allowlist": sorted(a.lower() for a in self.allowlist),
+                "networks": sorted(n.lower() for n in self.networks),
+                "assets": sorted(a.lower() for a in self.assets),
+                "limit": self.limit,
+                "total_budget": self.total_budget,
+                "expires_at": self.expires_at.isoformat() if self.expires_at else None,
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        )
 
     def spend_key(self) -> str:
         """Stable key scoping velocity/budget accounting to this mandate's identity.
