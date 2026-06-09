@@ -98,3 +98,16 @@ One case per line; `#` lines ignored.
 Automated adversarial generation: loop a strong model to craft intents that get ALLOW
 to an attacker address, measure escape rate. That hunts the blind spot this static
 corpus only samples. Natural follow-on once Path A gives a baseline.
+
+## Attribution & data
+
+The adapters translate **third-party datasets** into the Aegis corpus format. Those
+datasets are **not redistributed in this repo** — fetch / generate them locally:
+
+- **InjecAgent** (Zhan et al.) — github.com/uiuc-kang-lab/InjecAgent. Run
+  `adapters/injecagent_adapter.py` against its `data/test_cases_*.json`.
+- **AgentDojo** (Debenedetti et al.) — `pip install agentdojo`, then
+  `adapters/agentdojo_adapter.py`.
+
+Generated corpora (`injecagent_*.jsonl`, `agentdojo_corpus.jsonl`) are git-ignored.
+Self-authored corpora (`smoke_corpus.jsonl`, `crypto_corpus.jsonl`) are ours and kept.

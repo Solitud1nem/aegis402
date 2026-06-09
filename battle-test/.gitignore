@@ -4,3 +4,7 @@ InjecAgent/
 # Evidence DBs and caches
 *.db
 __pycache__/
+
+# Third-party benchmark corpora (adapter outputs) — regenerate locally, do not commit
+injecagent_*.jsonl
+agentdojo_corpus.jsonl
