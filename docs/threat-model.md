@@ -16,7 +16,14 @@ chargeback** — so the only effective control is *before* signing.
   injection). Cannot access the owner's keys, the guard's host, or the original
   trusted request.
 - **Trust boundary:** `user_request` and `mandate` are trusted; everything in
-  `untrusted_context` is attacker-influenceable. Stateful velocity/budget accounting
+  `untrusted_context` is attacker-influenceable. The mandate is the trust anchor, so a
+  fully prompt-injected agent that can rewrite its *own* mandate (forge a permissive
+  allowlist/limit) would otherwise escalate itself. **Mitigation (opt-in):**
+  `require_signed_mandate` makes the guard verify an HMAC over the mandate's canonical
+  content against a secret held only in server config (see `mandate_auth`); a
+  missing/forged/escalated mandate fails closed to BLOCK. A compromised agent can replay
+  the owner's real mandate but cannot mint or escalate one. Stateful velocity/budget
+  accounting
   is scoped by a key derived **only from the trusted mandate** (`mandate.id`, else a
   hash of its content) — never from an agent-controlled field, so a compromised agent
   cannot reset its own spend history. Without a mandate, spend falls back to a fixed
