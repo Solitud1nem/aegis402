@@ -92,6 +92,35 @@ function failClosedVerdict(reason: string): Verdict {
 }
 
 /**
+ * Validate that `amount` (minimal units) is an exact non-negative integer.
+ *
+ * Amounts can exceed 2^53 (e.g. 1 token at 18 decimals = 1e18 > Number.MAX_SAFE_INTEGER),
+ * where a JS `number` silently loses precision — so the guard would vet a *different*
+ * value than what settles. Returns a reason string if the amount is unsafe, else null;
+ * the caller fails closed to BLOCK. Pass large amounts as decimal strings.
+ */
+function unsafeAmountReason(amount: number | string): string | null {
+  if (typeof amount === "number") {
+    if (!Number.isInteger(amount)) return `amount ${amount} is not an integer`;
+    if (!Number.isSafeInteger(amount)) {
+      return `amount ${amount} exceeds Number.MAX_SAFE_INTEGER — pass it as a string to avoid precision loss`;
+    }
+    return amount < 0 ? `amount ${amount} is negative` : null;
+  }
+  return /^\d+$/.test(amount) ? null : `amount "${amount}" is not a non-negative integer string`;
+}
+
+/** Fail-closed verdict for a payment the adapter rejects before it ever reaches the guard. */
+function rejectedVerdict(reason: string): Verdict {
+  return {
+    verdict: "BLOCK",
+    score: 1.0,
+    reason: `rejected before guard (fail-closed BLOCK): ${reason}`,
+    triggered_layers: [],
+  };
+}
+
+/**
  * Ask the Aegis402 core to inspect a payment intent.
  *
  * Never throws on transport errors: on timeout/failure it returns a fail-closed
@@ -105,6 +134,11 @@ export async function inspectPayment(
   const endpoint = options.endpoint ?? DEFAULTS.endpoint;
   const timeoutMs = options.timeoutMs ?? DEFAULTS.timeoutMs;
   const failClosed = options.failClosed ?? DEFAULTS.failClosed;
+
+  // Reject a precision-lossy amount up front: an imprecise number would let the guard
+  // vet a value that differs from what actually settles.
+  const amountReason = unsafeAmountReason(intent.payment_intent.amount);
+  if (amountReason !== null) return rejectedVerdict(amountReason);
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
