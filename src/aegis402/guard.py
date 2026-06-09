@@ -15,6 +15,7 @@ from .evidence import EvidenceLog
 from .interceptor import build_intent
 from .ledger import SpendLedger
 from .mandate_auth import verify_mandate
+from .revocation import RevocationStore
 from .schemas import Intent, Signal, Verdict, VerdictType, resolve_spend_key
 
 logger = logging.getLogger(__name__)
@@ -29,11 +30,13 @@ class Guard:
         engine: DecisionEngine | None = None,
         evidence: EvidenceLog | None = None,
         ledger: SpendLedger | None = None,
+        revocations: RevocationStore | None = None,
     ) -> None:
         self._settings = settings or get_settings()
         self._engine = engine or DecisionEngine(self._settings)
         self._evidence = evidence or EvidenceLog(self._settings)
         self._ledger = ledger or SpendLedger(self._settings)
+        self._revocations = revocations or RevocationStore(self._settings)
 
     def inspect(self, raw: dict[str, Any]) -> Verdict:
         """Normalize, evaluate and record a raw intent.
@@ -115,13 +118,20 @@ class Guard:
         if not verify_mandate(intent.mandate, secret):
             return self._fail_closed("mandate signature missing or invalid")
         if intent.mandate.expires_at is None:
-            # A valid signature alone is replayable forever (and unrevocable). Requiring an
-            # expiry bounds the replay window in the signed-mandate posture; L3 then blocks
-            # any payment past it. Full early revocation still needs a revocation list.
+            # A valid signature alone is replayable forever. Requiring an expiry bounds the
+            # replay window in the signed-mandate posture; L3 then blocks any payment past
+            # it. Early revocation before expiry is handled by the revocation store below.
             return self._fail_closed(
                 "signed mandate must carry an expiry (replay protection)"
             )
+        if self._revocations.is_revoked(intent.mandate.spend_key()):
+            return self._fail_closed("mandate has been revoked")
         return None
+
+    def revoke_mandate(self, mandate_key: str, reason: str = "") -> bool:
+        """Revoke a signed mandate by its identity (``Mandate.spend_key()``) so the guard
+        rejects it before its expiry. Returns True (revocation is idempotent)."""
+        return self._revocations.revoke(mandate_key, reason)
 
     @staticmethod
     def _fail_closed(reason: str) -> Verdict:

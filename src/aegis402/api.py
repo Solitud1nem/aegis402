@@ -3,6 +3,8 @@
 Endpoints:
 * ``POST /guard/inspect``   — the primary insertion point; raw intent → verdict.
 * ``POST /guard/reconcile`` — settle/void a reserved spend by its ``spend_id``.
+* ``POST /mandate/revoke``  — revoke a signed mandate by its identity.
+* ``GET  /evidence/verify`` — verify the evidence hash chain.
 * ``GET  /health``          — liveness plus whether the L2 model is enabled.
 """
 
@@ -28,6 +30,13 @@ class ReconcileRequest(BaseModel):
     settled: bool = Field(description="True = confirm settled; False = void (free headroom).")
 
 
+class RevokeRequest(BaseModel):
+    """Revoke a signed mandate by its identity (its spend_key)."""
+
+    mandate_key: str = Field(description="The mandate's spend_key (explicit id or content hash).")
+    reason: str = Field(default="", description="Optional audit note.")
+
+
 @app.get("/health")
 def health() -> dict[str, Any]:
     """Liveness probe with key runtime flags."""
@@ -46,6 +55,13 @@ def reconcile(req: ReconcileRequest) -> dict[str, Any]:
     """Settle or void a reserved spend so a never-settled payment frees its headroom."""
     ok = _guard.reconcile(req.spend_id, settled=req.settled)
     return {"ok": ok, "spend_id": req.spend_id, "settled": req.settled}
+
+
+@app.post("/mandate/revoke")
+def revoke_mandate(req: RevokeRequest) -> dict[str, Any]:
+    """Revoke a signed mandate so the guard rejects it before expiry."""
+    ok = _guard.revoke_mandate(req.mandate_key, req.reason)
+    return {"ok": ok, "mandate_key": req.mandate_key}
 
 
 @app.get("/evidence/verify")

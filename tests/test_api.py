@@ -30,6 +30,13 @@ def test_inspect_blocks_attack() -> None:
     assert resp.json()["verdict"] == "BLOCK"
 
 
+def test_mandate_revoke_endpoint_shape() -> None:
+    resp = client.post("/mandate/revoke", json={"mandate_key": "agent-x", "reason": "test"})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["ok"] is True and body["mandate_key"] == "agent-x"
+
+
 def test_evidence_verify_endpoint_shape() -> None:
     resp = client.get("/evidence/verify")
     assert resp.status_code == 200
